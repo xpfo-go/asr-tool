@@ -39,7 +39,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config Release --parallel 1
+          cmake --build build --config Release --parallel 2
 
       - name: Prepare Output
         shell: pwsh
