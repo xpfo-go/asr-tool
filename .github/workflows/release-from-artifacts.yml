@@ -1,0 +1,77 @@
+name: Release From CI Artifacts
+
+on:
+  workflow_run:
+    workflows:
+      - CI Build (Linux/macOS/Windows)
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve Version Tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=$(git tag --points-at "${{ github.event.workflow_run.head_sha }}" | grep -E '^v' | head -n1 || true)
+          if [[ -z "$TAG" ]]; then
+            echo "No v* tag on this commit; skip release."
+            exit 0
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download Artifact (Linux)
+        if: steps.tag.outputs.tag != ''
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: asr-linux-x86_64
+          path: dist/linux
+
+      - name: Download Artifact (macOS)
+        if: steps.tag.outputs.tag != ''
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: asr-macos-arm64
+          path: dist/macos
+
+      - name: Download Artifact (Windows)
+        if: steps.tag.outputs.tag != ''
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: asr-windows-x86_64
+          path: dist/windows
+
+      - name: Create or Update Release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --target "$SHA" --title "$TAG" --notes ""
+
+          gh release upload "$TAG" dist/linux/asr#asr-linux-x86_64 --clobber
+          gh release upload "$TAG" dist/macos/asr#asr-macos-arm64 --clobber
+          gh release upload "$TAG" dist/windows/asr.exe#asr-windows-x86_64.exe --clobber

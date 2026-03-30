@@ -29,6 +29,30 @@ git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 
 部分 Codex 环境使用 `~/.agents/skills`，请按实际路径放置。
 
+下载对应平台二进制到 Skill 目录（按你的系统选择一条）：
+
+```bash
+SKILL_DIR=~/.claude/skills/asr-tool
+ASR_VERSION=v1.0.0
+mkdir -p "$SKILL_DIR/bin"
+
+# macOS arm64
+curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64"
+chmod +x "$SKILL_DIR/bin/asr"
+
+# Linux x86_64
+curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64"
+chmod +x "$SKILL_DIR/bin/asr"
+```
+
+Windows x86_64（PowerShell）：
+```powershell
+$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"
+$ASR_VERSION="v1.0.0"
+New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null
+curl.exe -fL -o "$SKILL_DIR\bin\asr.exe" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.exe"
+```
+
 ---
 
 ## 2. 模型（推荐手动下载到 `.cache`）

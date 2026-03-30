@@ -20,7 +20,7 @@ on:
       - .github/workflows/ci-build-all.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -118,51 +118,3 @@ jobs:
           name: asr-windows-x86_64
           path: out/windows-x86_64/asr.exe
           if-no-files-found: error
-
-  commit-binaries:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
-    name: Commit Binaries
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download Linux Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: asr-linux-x86_64
-          path: bin/linux-x86_64
-
-      - name: Download macOS Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: asr-macos-arm64
-          path: bin/macos-arm64
-
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: asr-windows-x86_64
-          path: bin/windows-x86_64
-
-      - name: Normalize Permissions
-        run: |
-          chmod +x bin/linux-x86_64/asr || true
-          chmod +x bin/macos-arm64/asr || true
-
-      - name: Commit Updated Binaries
-        run: |
-          if [[ -n "$(git status --porcelain -- bin)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add bin
-            git commit -m "chore(ci): update binaries [skip ci]"
-            git pull --rebase origin main
-            git push
-          else
-            echo "No binary changes"
-          fi
