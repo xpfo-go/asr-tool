@@ -31,7 +31,7 @@ Transcriber::Transcriber(const std::string& model_path,
                          const std::string& language,
                          const std::string& prompt,
                          Backend backend)
-    : impl_(new Impl), ready_(false) {
+    : impl_(std::make_unique<Impl>()), ready_(false) {
     impl_->language = language;
     impl_->prompt = prompt;
     impl_->backend = backend;

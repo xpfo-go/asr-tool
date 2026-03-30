@@ -81,6 +81,7 @@ FetchContent_MakeAvailable(whisper)
 # ============================================================
 add_executable(asr
     src/main.cpp
+    src/model_manager.cpp
     src/platform.cpp
     src/audio.cpp
     src/transcriber.cpp

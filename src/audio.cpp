@@ -145,6 +145,7 @@ int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
 
 struct AudioReader::Impl {
     std::FILE* file = nullptr;
+    std::filesystem::path temp_wav_path;
     size_t total_samples_read = 0;
     size_t data_size = 0;
     size_t data_offset = 0;
@@ -155,16 +156,22 @@ struct AudioReader::Impl {
             std::fclose(file);
             file = nullptr;
         }
+        if (!temp_wav_path.empty()) {
+            std::error_code ec;
+            std::filesystem::remove(temp_wav_path, ec);
+        }
     }
 };
 
-AudioReader::AudioReader(const std::filesystem::path& path) : impl_(new Impl) {
+AudioReader::AudioReader(const std::filesystem::path& path)
+    : impl_(std::make_unique<Impl>()) {
     eof_ = false;
     total_duration_seconds_ = 0.0;
     processed_seconds_ = 0.0;
 
     // 用 FFmpeg 转换为临时 WAV 文件
     auto temp_path = make_temp_wav_path();
+    impl_->temp_wav_path = temp_path;
 
     (void)printf("[INFO] 转换音频格式: %s\n", path.filename().string().c_str());
     int ret = run_ffmpeg(path.string(), temp_path.string());
@@ -221,40 +228,15 @@ AudioReader::AudioReader(const std::filesystem::path& path) : impl_(new Impl) {
     total_duration_seconds_ =
         static_cast<double>(impl_->data_size) / (sizeof(float) * SAMPLE_RATE);
 
-    // 清理临时文件
-    std::filesystem::remove(temp_path);
-
     (void)printf("[INFO] 音频已就绪 (采样率: %d Hz, 频道: %d)\n",
                  SAMPLE_RATE, CHANNELS);
 }
 
 AudioReader::~AudioReader() = default;
 
-AudioReader::AudioReader(AudioReader&& other) noexcept
-    : impl_(other.impl_),
-      eof_(other.eof_),
-      total_duration_seconds_(other.total_duration_seconds_),
-      processed_seconds_(other.processed_seconds_) {
-    other.impl_ = nullptr;
-    other.eof_ = true;
-    other.total_duration_seconds_ = 0.0;
-    other.processed_seconds_ = 0.0;
-}
+AudioReader::AudioReader(AudioReader&& other) noexcept = default;
 
-AudioReader& AudioReader::operator=(AudioReader&& other) noexcept {
-    if (this != &other) {
-        delete impl_;
-        impl_ = other.impl_;
-        eof_ = other.eof_;
-        total_duration_seconds_ = other.total_duration_seconds_;
-        processed_seconds_ = other.processed_seconds_;
-        other.impl_ = nullptr;
-        other.eof_ = true;
-        other.total_duration_seconds_ = 0.0;
-        other.processed_seconds_ = 0.0;
-    }
-    return *this;
-}
+AudioReader& AudioReader::operator=(AudioReader&& other) noexcept = default;
 
 AudioChunk AudioReader::read_chunk() {
     AudioChunk chunk;

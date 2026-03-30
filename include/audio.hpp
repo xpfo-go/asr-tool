@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,7 +32,7 @@ public:
 
 private:
     struct Impl;
-    Impl* impl_;
+    std::unique_ptr<Impl> impl_;
     bool eof_ = false;
     double total_duration_seconds_ = 0.0;
     double processed_seconds_ = 0.0;

@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <filesystem>
+#include <memory>
 #include <string>
 
 class Transcriber {
@@ -19,7 +20,7 @@ public:
 
 private:
     struct Impl;
-    Impl* impl_;
+    std::unique_ptr<Impl> impl_;
     bool ready_ = false;
     std::string error_message_;
 };
