@@ -33,3 +33,6 @@ compile_commands.json
 
 # Keep project build config tracked
 !CMakeLists.txt
+
+# Avoid duplicate top-level binary, use platform subdirs under bin/
+bin/asr
