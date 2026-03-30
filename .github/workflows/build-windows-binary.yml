@@ -26,10 +26,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+
       - name: Configure
         shell: pwsh
         run: |
-          cmake -B build -A x64 -DASR_ENABLE_CUDA=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build
         shell: pwsh

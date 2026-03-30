@@ -32,14 +32,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Install CUDA Toolkit (Linux)
+        if: runner.os == 'Linux'
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+
+      - name: Install CUDA Toolkit (Windows)
+        if: runner.os == 'Windows'
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=OFF
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=OFF
+        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=ON
 
       - name: Build (Linux/macOS)
         if: runner.os != 'Windows'

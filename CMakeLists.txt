@@ -69,7 +69,7 @@ if(APPLE)
 endif()
 
 # Linux/Windows: CUDA
-if((LINUX OR WIN32) AND ASR_ENABLE_CUDA)
+if(((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR WIN32) AND ASR_ENABLE_CUDA)
     set(GGML_CUDA ON CACHE BOOL "" FORCE)
     message(STATUS "Enabled GGML_CUDA for NVIDIA GPU")
 endif()

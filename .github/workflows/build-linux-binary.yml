@@ -26,15 +26,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.4.1'
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg cmake build-essential
 
-      - name: Build Linux Binary
+      - name: Configure
         run: |
-          chmod +x scripts/build-linux.sh
-          ./scripts/build-linux.sh
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON
+
+      - name: Build
+        run: |
+          cmake --build build --parallel
+
+      - name: Prepare Output
+        run: |
+          mkdir -p bin/linux-x86_64
+          cp build/asr bin/linux-x86_64/asr
+          chmod +x bin/linux-x86_64/asr
 
       - name: Commit Updated Binary
         run: |
