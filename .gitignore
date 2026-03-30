@@ -30,3 +30,6 @@ compile_commands.json
 *.json
 *.srt
 *.vtt
+
+# Keep project build config tracked
+!CMakeLists.txt
