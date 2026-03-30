@@ -1,0 +1,62 @@
+name: Build Windows Binary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - scripts/build-windows.ps1
+      - .github/workflows/build-windows-binary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -A x64 -DASR_ENABLE_CUDA=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Prepare Output
+        shell: pwsh
+        run: |
+          $dest = "bin/windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item "build/Release/asr.exe" "$dest/asr.exe" -Force
+          Get-ChildItem "build/Release" -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName (Join-Path $dest $_.Name) -Force
+          }
+
+      - name: Commit Updated Binary
+        shell: pwsh
+        run: |
+          $changes = git status --porcelain -- bin/windows-x86_64
+          if ($changes) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add bin/windows-x86_64
+            git commit -m "chore(ci): update windows x86_64 binary [skip ci]"
+            git pull --rebase origin main
+            git push
+          } else {
+            Write-Host "No Windows binary changes"
+          }

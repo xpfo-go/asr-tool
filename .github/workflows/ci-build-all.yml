@@ -1,0 +1,79 @@
+name: CI Build (Linux/macOS/Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - scripts/**
+      - .github/workflows/ci-build-all.yml
+  pull_request:
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - scripts/**
+      - .github/workflows/ci-build-all.yml
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=OFF
+
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: cmake --build build --parallel
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Verify Binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: test -f build/asr
+
+      - name: Verify Binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "build/Release/asr.exe")) {
+            throw "build/Release/asr.exe not found"
+          }
+
+      - name: Upload Artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-${{ runner.os }}
+          path: build/asr
+          if-no-files-found: error
+
+      - name: Upload Artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-${{ runner.os }}
+          path: build/Release/asr.exe
+          if-no-files-found: error

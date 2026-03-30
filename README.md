@@ -2,6 +2,15 @@
 
 本地语音转文字工具，基于 whisper.cpp C++ 实现。
 
+## CI/CD
+
+仓库已配置 GitHub Actions：
+- 三平台编译校验：Linux / macOS / Windows
+- 三平台二进制自动构建并回写到 `bin/`：
+  - Linux: `bin/linux-x86_64/asr`
+  - macOS (Apple Silicon): `bin/macos-arm64/asr`
+  - Windows: `bin/windows-x86_64/asr.exe`（若构建目录有额外 DLL 也会一并回写）
+
 ## Claude Code / Codex 安装
 
 将此仓库克隆到 Claude Code 或 Codex 的 `skills` 目录即可使用：
