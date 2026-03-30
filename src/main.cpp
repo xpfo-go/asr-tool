@@ -4,6 +4,7 @@
 #include "transcriber.hpp"
 #include "types.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +16,7 @@ namespace {
 
 constexpr const char* MODEL_NAME = "ggml-large-v3-turbo-q8_0.bin";
 constexpr const char* VERSION = "1.0.0";
+constexpr std::uintmax_t MIN_MODEL_FILE_SIZE = 64ULL * 1024ULL * 1024ULL;  // 64MB
 
 // 获取默认模型路径
 std::filesystem::path get_default_model_path() {
@@ -44,11 +46,125 @@ std::string get_model_url() {
            std::string(MODEL_NAME);
 }
 
-// 检查模型是否存在，不存在则提示下载
+std::string shell_quote(const std::string& s) {
+#if defined(_WIN32)
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"') {
+            out += "\"\"";
+        } else {
+            out.push_back(c);
+        }
+    }
+    out += "\"";
+    return out;
+#else
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') {
+            out += "'\"'\"'";
+        } else {
+            out.push_back(c);
+        }
+    }
+    out += "'";
+    return out;
+#endif
+}
+
+bool run_command_quiet(const std::string& cmd) {
+#if defined(_WIN32)
+    const std::string full_cmd = cmd + " >NUL 2>&1";
+#else
+    const std::string full_cmd = cmd + " >/dev/null 2>&1";
+#endif
+    return std::system(full_cmd.c_str()) == 0;
+}
+
+bool has_command(const char* cmd) {
+#if defined(_WIN32)
+    const std::string check = "where " + std::string(cmd);
+#else
+    const std::string check = "command -v " + std::string(cmd);
+#endif
+    return run_command_quiet(check);
+}
+
+bool file_size_ok(const std::filesystem::path& path, std::uintmax_t min_size) {
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        return false;
+    }
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (ec) {
+        return false;
+    }
+    return size >= min_size;
+}
+
+bool try_download_main_model(const std::filesystem::path& model_path) {
+    if (!has_command("curl")) {
+        (void)fprintf(stderr, "[WARN] 未找到 curl，无法自动下载模型\n");
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(model_path.parent_path(), ec);
+    if (ec) {
+        (void)fprintf(stderr, "[WARN] 创建模型目录失败: %s\n",
+                      model_path.parent_path().string().c_str());
+        return false;
+    }
+
+    const std::filesystem::path part_path =
+        model_path.parent_path() / (model_path.filename().string() + ".part");
+    std::filesystem::remove(part_path, ec);
+    (void)ec;
+
+    const std::string cmd =
+        "curl -fL --retry 3 --retry-delay 1 --connect-timeout 20 -o " +
+        shell_quote(part_path.string()) + " " + shell_quote(get_model_url());
+    if (!run_command_quiet(cmd)) {
+        std::filesystem::remove(part_path, ec);
+        (void)ec;
+        return false;
+    }
+
+    if (!file_size_ok(part_path, MIN_MODEL_FILE_SIZE)) {
+        (void)fprintf(stderr, "[WARN] 下载的模型文件异常（大小不足）: %s\n",
+                      part_path.string().c_str());
+        std::filesystem::remove(part_path, ec);
+        (void)ec;
+        return false;
+    }
+
+    std::filesystem::rename(part_path, model_path, ec);
+    if (ec) {
+        (void)fprintf(stderr, "[WARN] 模型文件落盘失败: %s\n", ec.message().c_str());
+        std::filesystem::remove(part_path, ec);
+        (void)ec;
+        return false;
+    }
+
+    return file_size_ok(model_path, MIN_MODEL_FILE_SIZE);
+}
+
+// 检查模型是否存在，不存在时自动下载，失败则提示手动下载
 bool check_model(const std::filesystem::path& model_path) {
-    if (std::filesystem::exists(model_path)) {
+    if (file_size_ok(model_path, MIN_MODEL_FILE_SIZE)) {
         return true;
     }
+
+    (void)fprintf(stderr, "\n");
+    (void)fprintf(stderr, "[WARN] 模型文件不存在或不完整: %s\n",
+                  model_path.string().c_str());
+    (void)fprintf(stderr, "[INFO] 尝试自动下载模型（约 800MB）...\n");
+    if (try_download_main_model(model_path)) {
+        (void)printf("[INFO] 模型下载成功: %s\n", model_path.string().c_str());
+        return true;
+    }
+    (void)fprintf(stderr,
+                  "[WARN] 自动下载模型失败，请检查网络连接或代理配置\n");
 
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr,
@@ -57,7 +173,8 @@ bool check_model(const std::filesystem::path& model_path) {
     (void)fprintf(stderr, "首次运行需要下载模型（约 800MB）\n");
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "手动下载命令:\n");
-    (void)fprintf(stderr, "  mkdir -p ~/.cache/whisper\n");
+    (void)fprintf(stderr, "  mkdir -p \"%s\"\n",
+                  model_path.parent_path().string().c_str());
     (void)fprintf(stderr, "  curl -fSL -o \"%s\" \"%s\"\n",
                   model_path.string().c_str(), get_model_url().c_str());
     (void)fprintf(stderr, "\n");
@@ -115,29 +232,6 @@ bool starts_with(const std::string& s, const std::string& prefix) {
 bool ends_with(const std::string& s, const std::string& suffix) {
     return s.size() >= suffix.size() &&
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-}
-
-std::string shell_quote(const std::string& s) {
-    std::string out = "'";
-    for (char c : s) {
-        if (c == '\'') {
-            out += "'\"'\"'";
-        } else {
-            out.push_back(c);
-        }
-    }
-    out += "'";
-    return out;
-}
-
-bool run_command_quiet(const std::string& cmd) {
-    return std::system(cmd.c_str()) == 0;
-}
-
-bool has_command(const char* cmd) {
-    const std::string check =
-        "command -v " + std::string(cmd) + " >/dev/null 2>&1";
-    return run_command_quiet(check);
 }
 
 std::string strip_quant_suffix(std::string model_base) {
@@ -199,14 +293,14 @@ bool try_download_coreml_encoder(const std::string& model_name,
 
     const std::string dl_cmd =
         "curl -fL -o " + shell_quote(zip_path.string()) + " " +
-        shell_quote(url) + " >/dev/null 2>&1";
+        shell_quote(url);
     if (!run_command_quiet(dl_cmd)) {
         return false;
     }
 
     const std::string unzip_cmd =
         "unzip -o " + shell_quote(zip_path.string()) + " -d " +
-        shell_quote(target_dir.string()) + " >/dev/null 2>&1";
+        shell_quote(target_dir.string());
     const bool unzip_ok = run_command_quiet(unzip_cmd);
     std::filesystem::remove(zip_path, ec);
     (void)ec;
