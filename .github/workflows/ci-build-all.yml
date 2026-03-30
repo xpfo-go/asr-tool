@@ -55,7 +55,7 @@ jobs:
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual"
+        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual"
 
       - name: Build (Linux)
         if: runner.os == 'Linux'

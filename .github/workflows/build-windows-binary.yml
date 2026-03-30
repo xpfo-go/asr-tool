@@ -34,7 +34,7 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
-          cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual"
 
       - name: Build
         shell: pwsh
@@ -51,7 +51,30 @@ jobs:
             Copy-Item $_.FullName (Join-Path $dest $_.Name) -Force
           }
 
+      - name: Check Binary Size
+        id: size_check
+        shell: pwsh
+        run: |
+          $exe = "bin/windows-x86_64/asr.exe"
+          $size = (Get-Item $exe).Length
+          $sizeMB = [Math]::Round($size / 1MB, 2)
+          Write-Host "Windows binary size: $sizeMB MB"
+          if ($size -gt 100MB) {
+            Write-Warning "Binary exceeds GitHub 100MB limit; skip committing to repo."
+            "too_large=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "too_large=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-windows-x86_64
+          path: bin/windows-x86_64
+          if-no-files-found: error
+
       - name: Commit Updated Binary
+        if: steps.size_check.outputs.too_large != 'true'
         shell: pwsh
         run: |
           $changes = git status --porcelain -- bin/windows-x86_64
