@@ -24,6 +24,7 @@ void print_help(const char* prog) {
                   "  -o, --output <路径>      输出文件路径 (默认: 输入文件.txt)\n"
                   "  -l, --language <语言>     源语言，如 zh/en/ja/auto (默认: auto)\n"
                   "  -p, --prompt <文本>      提示文本，引导模型输出\n"
+                  "  -m, --model-dir <路径>   指定 .bin 模型目录（默认: ~/.cache/whisper）\n"
                   "  -f, --format <格式>      输出格式: text/json/srt/vtt (默认: text)\n"
                   "  -v, --verbose             显示详细日志\n"
                   "  -h, --help                显示帮助\n"
@@ -57,6 +58,7 @@ int main(int argc, char* argv[]) {
     std::string output_path;
     std::string language = "auto";
     std::string prompt;
+    std::string model_dir;
     std::string format_str = "text";
     bool verbose = false;
     std::vector<std::string> positional_args;
@@ -80,6 +82,8 @@ int main(int argc, char* argv[]) {
             language = argv[++i];
         } else if ((arg == "-p" || arg == "--prompt") && i + 1 < argc) {
             prompt = argv[++i];
+        } else if ((arg == "-m" || arg == "--model-dir") && i + 1 < argc) {
+            model_dir = argv[++i];
         } else if ((arg == "-f" || arg == "--format") && i + 1 < argc) {
             format_str = argv[++i];
         } else if (!arg.empty() && arg[0] != '-') {
@@ -152,13 +156,29 @@ int main(int argc, char* argv[]) {
 
     Backend backend = detect_backend();
 
-    const std::filesystem::path model_path = get_default_model_path();
+    std::filesystem::path model_path;
+    if (!model_dir.empty()) {
+        const std::filesystem::path model_dir_path(model_dir);
+        std::error_code ec;
+        if (std::filesystem::exists(model_dir_path, ec) && !ec &&
+            !std::filesystem::is_directory(model_dir_path, ec)) {
+            (void)fprintf(stderr, "[ERROR] --model-dir 不是目录: %s\n",
+                          model_dir_path.string().c_str());
+            return 1;
+        }
+        model_path = get_default_model_path(model_dir_path);
+    } else {
+        model_path = get_default_model_path();
+    }
+
     if (!ensure_main_model(model_path)) {
         return 3;
     }
-
 #if defined(__APPLE__)
-    ensure_coreml_encoder_model(model_path);
+    if (!ensure_coreml_encoder_model(model_path)) {
+        backend = Backend::CPU;
+        (void)fprintf(stderr, "[INFO] CoreML 编码器不可用，回退 CPU 推理\n");
+    }
 #endif
 
     (void)printf("[INFO] 模型路径: %s\n", model_path.string().c_str());

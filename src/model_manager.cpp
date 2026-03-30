@@ -1,20 +1,53 @@
 #include "model_manager.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#endif
 
 namespace {
 
 constexpr const char* MODEL_NAME = "ggml-large-v3-turbo-q8_0.bin";
+constexpr const char* MODEL_PREFIX = "ggml-large-v3";
 constexpr std::uintmax_t MIN_MODEL_FILE_SIZE = 64ULL * 1024ULL * 1024ULL;  // 64MB
 
 std::string get_model_url() {
     return "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" +
            std::string(MODEL_NAME);
+}
+
+std::filesystem::path get_model_cache_dir(
+    const std::filesystem::path& model_dir_override) {
+    if (!model_dir_override.empty()) {
+        return model_dir_override;
+    }
+
+    const char* cache_home = std::getenv("XDG_CACHE_HOME");
+    if (!cache_home || cache_home[0] == '\0') {
+#if defined(_WIN32)
+        const char* home = std::getenv("USERPROFILE");
+#else
+        const char* home = std::getenv("HOME");
+#endif
+        if (!home || home[0] == '\0') {
+            home = ".";
+        }
+        std::filesystem::path p(home);
+        p /= ".cache";
+        p /= "whisper";
+        return p;
+    }
+
+    std::filesystem::path p(cache_home);
+    p /= "whisper";
+    return p;
 }
 
 std::string shell_quote(const std::string& s) {
@@ -52,6 +85,63 @@ bool run_command_quiet(const std::string& cmd) {
     return std::system(full_cmd.c_str()) == 0;
 }
 
+struct CommandResult {
+    int exit_code = -1;
+    std::string output;
+};
+
+int decode_exit_status(int raw_status) {
+#if defined(_WIN32)
+    return raw_status;
+#else
+    if (raw_status == -1) {
+        return -1;
+    }
+    if (WIFEXITED(raw_status)) {
+        return WEXITSTATUS(raw_status);
+    }
+    if (WIFSIGNALED(raw_status)) {
+        return 128 + WTERMSIG(raw_status);
+    }
+    return raw_status;
+#endif
+}
+
+CommandResult run_command_capture(const std::string& cmd) {
+    CommandResult result;
+    const std::string full_cmd = cmd + " 2>&1";
+#if defined(_WIN32)
+    FILE* pipe = _popen(full_cmd.c_str(), "r");
+#else
+    FILE* pipe = popen(full_cmd.c_str(), "r");
+#endif
+    if (!pipe) {
+        result.exit_code = -1;
+        return result;
+    }
+
+    char buf[512] = {0};
+    for (;;) {
+        const std::size_t n = std::fread(buf, 1, sizeof(buf), pipe);
+        if (n > 0) {
+            result.output.append(buf, n);
+            (void)std::fwrite(buf, 1, n, stderr);
+            (void)std::fflush(stderr);
+        }
+        if (n < sizeof(buf)) {
+            break;
+        }
+    }
+
+#if defined(_WIN32)
+    const int raw_status = _pclose(pipe);
+#else
+    const int raw_status = pclose(pipe);
+#endif
+    result.exit_code = decode_exit_status(raw_status);
+    return result;
+}
+
 bool has_command(const char* cmd) {
 #if defined(_WIN32)
     const std::string check = "where " + std::string(cmd);
@@ -59,6 +149,15 @@ bool has_command(const char* cmd) {
     const std::string check = "command -v " + std::string(cmd);
 #endif
     return run_command_quiet(check);
+}
+
+bool starts_with(const std::string& s, const std::string& prefix) {
+    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool ends_with(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 bool file_size_ok(const std::filesystem::path& path, std::uintmax_t min_size) {
@@ -71,6 +170,46 @@ bool file_size_ok(const std::filesystem::path& path, std::uintmax_t min_size) {
         return false;
     }
     return size >= min_size;
+}
+
+std::optional<std::filesystem::path> find_cached_large_v3_model(
+    const std::filesystem::path& cache_dir) {
+    std::error_code ec;
+    if (!std::filesystem::exists(cache_dir, ec) || ec) {
+        return std::nullopt;
+    }
+
+    std::vector<std::filesystem::path> candidates;
+    for (const auto& entry : std::filesystem::directory_iterator(cache_dir, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+
+        const std::string filename = entry.path().filename().string();
+        if (!starts_with(filename, MODEL_PREFIX) || !ends_with(filename, ".bin")) {
+            continue;
+        }
+        if (!file_size_ok(entry.path(), MIN_MODEL_FILE_SIZE)) {
+            continue;
+        }
+        candidates.push_back(entry.path());
+    }
+
+    if (candidates.empty()) {
+        return std::nullopt;
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    for (const auto& path : candidates) {
+        if (path.filename() == MODEL_NAME) {
+            return path;
+        }
+    }
+    return candidates.front();
 }
 
 bool replace_file(const std::filesystem::path& src,
@@ -119,9 +258,16 @@ bool try_download_main_model(const std::filesystem::path& model_path) {
     (void)ec;
 
     const std::string cmd =
-        "curl -fL --retry 3 --retry-delay 1 --connect-timeout 20 -o " +
+        "curl -fL --show-error --progress-bar --retry 3 --retry-delay 1 "
+        "--connect-timeout 20 -o " +
         shell_quote(part_path.string()) + " " + shell_quote(get_model_url());
-    if (!run_command_quiet(cmd)) {
+    (void)fprintf(stderr, "[INFO] 下载中（主模型）...\n");
+    CommandResult curl_result = run_command_capture(cmd);
+    if (curl_result.exit_code != 0) {
+        (void)fprintf(stderr,
+                      "[WARN] 自动下载命令执行失败 (exit=%d)\n",
+                      curl_result.exit_code);
+        (void)fprintf(stderr, "[WARN] 详细错误见上方实时输出\n");
         std::filesystem::remove(part_path, ec);
         (void)ec;
         return false;
@@ -147,15 +293,6 @@ bool try_download_main_model(const std::filesystem::path& model_path) {
 }
 
 #if defined(__APPLE__)
-bool starts_with(const std::string& s, const std::string& prefix) {
-    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
-}
-
-bool ends_with(const std::string& s, const std::string& suffix) {
-    return s.size() >= suffix.size() &&
-           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-}
-
 std::string strip_quant_suffix(std::string model_base) {
     auto dash = model_base.rfind('-');
     if (dash != std::string::npos) {
@@ -215,8 +352,17 @@ bool try_download_coreml_encoder(const std::string& model_name,
         model_name + "-encoder.mlmodelc.zip";
 
     const std::string dl_cmd =
-        "curl -fL -o " + shell_quote(zip_path.string()) + " " + shell_quote(url);
-    if (!run_command_quiet(dl_cmd)) {
+        "curl -fL --show-error --progress-bar --retry 3 --retry-delay 1 "
+        "--connect-timeout 20 -o " +
+        shell_quote(zip_path.string()) + " " + shell_quote(url);
+    (void)fprintf(stderr, "[INFO] 下载中（CoreML 编码器）...\n");
+    CommandResult dl_result = run_command_capture(dl_cmd);
+    if (dl_result.exit_code != 0) {
+        (void)fprintf(stderr,
+                      "[WARN] CoreML 编码器下载失败 (exit=%d)\n",
+                      dl_result.exit_code);
+        (void)fprintf(stderr, "[WARN] 详细错误见上方实时输出\n");
+        std::filesystem::remove(zip_path, ec);
         return false;
     }
 
@@ -232,28 +378,20 @@ bool try_download_coreml_encoder(const std::string& model_name,
 
 }  // namespace
 
-std::filesystem::path get_default_model_path() {
-    const char* cache_home = std::getenv("XDG_CACHE_HOME");
-    if (!cache_home || cache_home[0] == '\0') {
-#if defined(_WIN32)
-        const char* home = std::getenv("USERPROFILE");
-#else
-        const char* home = std::getenv("HOME");
-#endif
-        if (!home || home[0] == '\0') {
-            home = ".";
-        }
-        std::filesystem::path p(home);
-        p /= ".cache";
-        p /= "whisper";
-        p /= MODEL_NAME;
-        return p;
+std::filesystem::path get_default_model_path(
+    const std::filesystem::path& model_dir) {
+    const std::filesystem::path cache_dir = get_model_cache_dir(model_dir);
+    const std::filesystem::path preferred = cache_dir / MODEL_NAME;
+    if (file_size_ok(preferred, MIN_MODEL_FILE_SIZE)) {
+        return preferred;
     }
 
-    std::filesystem::path p(cache_home);
-    p /= "whisper";
-    p /= MODEL_NAME;
-    return p;
+    auto discovered = find_cached_large_v3_model(cache_dir);
+    if (discovered.has_value()) {
+        return discovered.value();
+    }
+
+    return preferred;
 }
 
 bool ensure_main_model(const std::filesystem::path& model_path) {
@@ -289,7 +427,7 @@ bool ensure_main_model(const std::filesystem::path& model_path) {
     (void)fprintf(stderr, "  curl -fSL -o \"%s\" \"%s\"\n",
                   model_path.string().c_str(), get_model_url().c_str());
     (void)fprintf(stderr, "\n");
-    (void)fprintf(stderr, "或设置环境变量 XDG_CACHE_HOME 指定缓存目录\n");
+    (void)fprintf(stderr, "或使用 -m/--model-dir 指定模型目录\n");
 #if defined(__APPLE__)
     (void)fprintf(stderr,
                   "提示: 程序会尝试自动下载预构建 CoreML 编码器，失败时会回退到非 CoreML 路径\n");
@@ -299,39 +437,39 @@ bool ensure_main_model(const std::filesystem::path& model_path) {
 }
 
 #if defined(__APPLE__)
-void ensure_coreml_encoder_model(const std::filesystem::path& model_path) {
+bool ensure_coreml_encoder_model(const std::filesystem::path& model_path) {
     const std::filesystem::path coreml_path =
         derive_coreml_encoder_path(model_path);
     if (std::filesystem::exists(coreml_path)) {
-        (void)printf("[INFO] 检测到 CoreML 编码器: %s\n",
-                     coreml_path.string().c_str());
-        return;
+        (void)fprintf(stderr, "[INFO] 检测到 CoreML 编码器: %s\n",
+                      coreml_path.string().c_str());
+        return true;
     }
 
     const char* disable = std::getenv("ASR_DISABLE_COREML_AUTO_DOWNLOAD");
     if (disable && std::string(disable) == "1") {
-        (void)printf("[INFO] 已禁用 CoreML 自动下载，跳过\n");
-        return;
+        (void)fprintf(stderr, "[INFO] 已禁用 CoreML 自动下载，跳过\n");
+        return false;
     }
 
     auto model_name_opt = derive_model_name(model_path);
     if (!model_name_opt.has_value()) {
         (void)fprintf(stderr,
                       "[WARN] 无法解析模型名，跳过 CoreML 自动准备\n");
-        return;
+        return false;
     }
     const std::string model_name = model_name_opt.value();
 
-    (void)printf("[INFO] 未检测到 CoreML 编码器，尝试自动准备: %s\n",
-                 coreml_path.string().c_str());
-    (void)printf("[INFO] 尝试下载预构建 CoreML 编码器...\n");
+    (void)fprintf(stderr, "[INFO] 未检测到 CoreML 编码器，尝试自动准备: %s\n",
+                  coreml_path.string().c_str());
+    (void)fprintf(stderr, "[INFO] 尝试下载预构建 CoreML 编码器...\n");
     if (try_download_coreml_encoder(model_name, coreml_path)) {
-        (void)printf("[INFO] CoreML 编码器下载成功\n");
-        return;
+        (void)fprintf(stderr, "[INFO] CoreML 编码器下载成功\n");
+        return true;
     }
 
     (void)fprintf(stderr,
                   "[WARN] 预构建 CoreML 编码器下载失败，将继续使用非 CoreML 路径\n");
+    return false;
 }
 #endif
-

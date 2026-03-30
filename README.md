@@ -1,25 +1,23 @@
 # asr-tool
 
-本地语音转文字工具，基于 whisper.cpp C++ 实现。
+简体中文 | [English](docs/README_en.md)
 
-## CI/CD
+本地语音转文字工具，基于 whisper.cpp（C++）。
+配置简单：安装 `ffmpeg` 并准备模型即可运行。大模型友好：默认 `ggml-large-v3-turbo-q8_0.bin`，同时支持自动发现同目录可用的 `ggml-large-v3*.bin`。加速策略：macOS 优先 CoreML（失败回退 CPU），Linux/Windows 优先 CUDA（失败回退 CPU）。
 
-仓库已配置 GitHub Actions：
-- 三平台编译校验：Linux / macOS / Windows
-- 三平台二进制构建产物通过 Actions Artifacts 提供下载
-- 发布时通过 Release Workflow 上传到 GitHub Releases
+---
 
-## 规范说明
+## 依赖
 
-- `SKILL.md` 采用 Agent Skills 规范 frontmatter（`name`、`description`）。
-- 自定义信息放在 `metadata` 字段中，避免使用未声明的顶层字段。
-- Skill 目录结构符合 `<skills>/<skill-name>/SKILL.md`。
+- 必需：`ffmpeg`、模型文件（缓存目录至少一个 `ggml-large-v3*.bin`）
+- 可选：`curl`（自动下载模型/CoreML）、`unzip`（macOS 解压 CoreML 包）
+- `ffmpeg` 安装：macOS `brew install ffmpeg`，Linux `sudo apt install ffmpeg`，Windows `choco install ffmpeg`
 
-## 安装
+---
 
-### 1) 安装 Skill（给 Claude Code / Codex）
+## 1. Skill 安装
 
-Skill 的安装只依赖仓库源码，不依赖 `bin/` 目录。直接克隆到 skills 目录即可：
+### 安装 Skill（Claude Code / Codex）
 
 ```bash
 # Claude Code
@@ -29,40 +27,50 @@ git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
 git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 ```
 
-安装后 Claude Code / Codex 会自动识别 skill，语音转写需求时会激活。
+部分 Codex 环境使用 `~/.agents/skills`，请按实际路径放置。
 
-部分 Codex 环境也可能使用 `~/.agents/skills`，若你的环境如此，请将目标路径替换为该目录。
+---
 
-### 2) 安装可执行文件（给最终运行）
+## 2. 模型（推荐手动下载到 `.cache`）
 
-优先从 GitHub Releases 下载对应平台二进制；平时测试也可从 Actions Artifacts 下载。
+- 默认模型：`ggml-large-v3-turbo-q8_0.bin`（约 800MB）
+- 默认目录：macOS/Linux `~/.cache/whisper/`，Windows `%USERPROFILE%\\.cache\\whisper\\`
+- 发现策略：优先 `ggml-large-v3-turbo-q8_0.bin`，否则自动查找同目录 `ggml-large-v3*.bin`
+- 若模型文件不存在，程序会尝试自动下载（失败会提示手动下载命令）
 
-### 3) 自行编译
-
+手动下载（macOS/Linux）：
 ```bash
-git clone https://github.com/xpfo-go/asr-tool.git
-cd asr-tool
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-sudo cp build/asr /usr/local/bin/
+mkdir -p ~/.cache/whisper
+curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-q8_0.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
 ```
 
-### 依赖
-
-- **FFmpeg**（强依赖）
-
+macOS 可选：手动下载 CoreML 编码器（`mlmodelc`）
 ```bash
-# macOS
-brew install ffmpeg
-
-# Linux
-sudo apt install ffmpeg
-
-# Windows
-choco install ffmpeg
+mkdir -p ~/.cache/whisper
+curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip"
+unzip -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip -d ~/.cache/whisper/
 ```
 
-## 使用方法
+手动下载（Windows PowerShell）：
+```powershell
+$dir = "$env:USERPROFILE\.cache\whisper"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+curl.exe -fL -o "$dir\ggml-large-v3-turbo-q8_0.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+```
+
+---
+
+## 使用
+
+### 1) 在 Claude Code / Codex 中使用
+
+可直接给一句提示词，例如：
+
+```text
+请把 /path/video_path.mp4 提取文字。
+```
+
+### 2) 使用 asr 二进制
 
 ```bash
 # 最简用法
@@ -74,20 +82,11 @@ asr meeting.m4a -o transcript.txt
 # 指定语言 + prompt
 asr audio.mp3 -l zh -p "药物名称、检查项目"
 
-# 输出为 SRT 字幕
+# 指定模型目录（目录下放 ggml-large-v3*.bin）
+asr audio.mp3 -m /data/models/whisper
+
+# 字幕格式
 asr video.mov -f srt -o subtitles.srt
 ```
 
-## 加速策略
-
-- **macOS**: CoreML → CPU
-- **Linux/Windows**: CUDA → CPU
-
-程序会自动检测并选择最佳加速方案。
-
-## 注意事项
-
-- 模型文件（`ggml-large-v3-turbo-q8_0.bin`，约 800MB）首次运行时会自动下载到缓存目录（默认 `~/.cache/whisper/`）
-- FFmpeg 是强依赖，未安装时程序会直接退出
-- 支持任意长度的音频，流式分块处理，内存占用恒定
-- GitHub 仓库单文件上限 100MB，超大二进制会通过 Artifacts / Releases 分发，而不是直接回写仓库
+默认 `text`（`.txt`）输出按转写片段分行。

@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -45,11 +46,39 @@ std::string ms_to_vtt_time(double ms) {
     return buf;
 }
 
+std::string trim_copy(const std::string& s) {
+    std::size_t begin = 0;
+    while (begin < s.size() &&
+           std::isspace(static_cast<unsigned char>(s[begin])) != 0) {
+        ++begin;
+    }
+    std::size_t end = s.size();
+    while (end > begin &&
+           std::isspace(static_cast<unsigned char>(s[end - 1])) != 0) {
+        --end;
+    }
+    return s.substr(begin, end - begin);
+}
+
 void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                     OutputFormat format) {
     switch (format) {
         case OutputFormat::Text: {
-            os << result.full_text << "\n";
+            if (!result.segments.empty()) {
+                for (const auto& seg : result.segments) {
+                    const std::string line = trim_copy(seg.text);
+                    if (line.empty()) {
+                        continue;
+                    }
+                    os << line << "\n";
+                }
+            } else {
+                const std::string text = trim_copy(result.full_text);
+                if (!text.empty()) {
+                    os << text;
+                }
+                os << "\n";
+            }
             break;
         }
 
