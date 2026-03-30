@@ -38,19 +38,42 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES='75-real;75-virtual'
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES='75-real;75-virtual'
 
       - name: Build
         run: |
-          cmake --build build --parallel 2
+          cmake --build build --parallel 4
 
       - name: Prepare Output
         run: |
           mkdir -p bin/linux-x86_64
+          strip build/asr || true
           cp build/asr bin/linux-x86_64/asr
           chmod +x bin/linux-x86_64/asr
 
+      - name: Check Binary Size
+        id: size_check
+        run: |
+          BIN="bin/linux-x86_64/asr"
+          SIZE=$(stat -c%s "$BIN")
+          SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE/1024/1024}")
+          echo "Linux binary size: ${SIZE_MB} MB"
+          if [[ "$SIZE" -gt $((100*1024*1024)) ]]; then
+            echo "::warning::Binary exceeds GitHub 100MB limit; skip committing to repo."
+            echo "too_large=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "too_large=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-linux-x86_64
+          path: bin/linux-x86_64/asr
+          if-no-files-found: error
+
       - name: Commit Updated Binary
+        if: steps.size_check.outputs.too_large != 'true'
         run: |
           if [[ -n "$(git status --porcelain -- bin/linux-x86_64/asr)" ]]; then
             git config user.name "github-actions[bot]"
