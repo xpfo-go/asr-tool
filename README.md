@@ -37,6 +37,12 @@ cd asr-tool
 ./bin/macos-arm64/asr recording.mp3
 ```
 
+Linux 二进制会由 GitHub Actions 自动构建并提交到：
+
+```bash
+./bin/linux-x86_64/asr
+```
+
 可选：加入 PATH
 ```bash
 ln -sf "$(pwd)/bin/macos-arm64/asr" ~/bin/asr

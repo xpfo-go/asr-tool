@@ -1,0 +1,49 @@
+name: Build Linux Binary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - scripts/build-linux.sh
+      - .github/workflows/build-linux-binary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg cmake build-essential
+
+      - name: Build Linux Binary
+        run: |
+          chmod +x scripts/build-linux.sh
+          ./scripts/build-linux.sh
+
+      - name: Commit Updated Binary
+        run: |
+          if [[ -n "$(git status --porcelain -- bin/linux-x86_64/asr)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add bin/linux-x86_64/asr
+            git commit -m "chore(ci): update linux binary [skip ci]"
+            git push
+          else
+            echo "No linux binary changes"
+          fi
