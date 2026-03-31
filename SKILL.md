@@ -16,14 +16,14 @@ metadata:
 
 ## 命令行接口
 
-请直接使用 Skill 二进制绝对路径（避免与 macOS 系统 `/usr/sbin/asr` 冲突）：
+请使用 Skill 二进制绝对路径（不要直接调用 `asr`，避免与 macOS 系统 `/usr/sbin/asr` 冲突）：
 
 ```bash
-"$HOME/.claude/skills/asr-tool/bin/asr" <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
+<ASR_BIN> <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
 ```
 
 ```bash
-"$HOME/.codex/skills/asr-tool/bin/asr" <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
+ASR_BIN="$HOME/.claude/skills/asr-tool/bin/asr"   # 或 ~/.codex/skills/asr-tool/bin/asr 或 ~/.agents/skills/asr-tool/bin/asr
 ```
 
 ### 参数说明
@@ -44,19 +44,19 @@ metadata:
 
 ```bash
 # 最简用法
-"$HOME/.claude/skills/asr-tool/bin/asr" recording.mp3
+<ASR_BIN> recording.mp3
 
 # 指定输出文件
-"$HOME/.claude/skills/asr-tool/bin/asr" meeting.m4a -o transcript.txt
+<ASR_BIN> meeting.m4a -o transcript.txt
 
 # 指定语言与 prompt
-"$HOME/.claude/skills/asr-tool/bin/asr" doctor_recording.mp3 -l zh -p "药物名称、检查项目"
+<ASR_BIN> doctor_recording.mp3 -l zh -p "药物名称、检查项目"
 
 # 指定模型目录
-"$HOME/.claude/skills/asr-tool/bin/asr" audio.mp3 -m /data/models/whisper
+<ASR_BIN> audio.mp3 -m /data/models/whisper
 
 # 输出为 SRT 字幕格式
-"$HOME/.claude/skills/asr-tool/bin/asr" video.mov -f srt -o subtitles.srt
+<ASR_BIN> video.mov -f srt -o subtitles.srt
 ```
 
 ## 输出格式

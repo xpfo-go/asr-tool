@@ -31,21 +31,23 @@ git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 
 Some Codex environments use `~/.agents/skills`; adjust the target path if needed.
 
-Download the platform binary into the Skill directory (pick one for your OS):
+Download the platform binary into the Skill directory (pick one for your OS; Linux/Windows are downloaded as zip and extracted automatically):
+
+Replace `SKILL_DIR` with your actual Skill path (for example `~/.claude/skills/asr-tool`, `~/.codex/skills/asr-tool`, or `~/.agents/skills/asr-tool`).
 
 macOS-aarch64:
 ```bash
-SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
+SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.2 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
 
 Linux-x86_64:
 ```bash
-SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64.zip" && unzip -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" -d "$SKILL_DIR/bin" && rm -f "$SKILL_DIR/bin/asr-linux-x86_64.zip" && chmod +x "$SKILL_DIR/bin/asr"
+SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.2 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64.zip" && unzip -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" -d "$SKILL_DIR/bin" && rm -f "$SKILL_DIR/bin/asr-linux-x86_64.zip" && chmod +x "$SKILL_DIR/bin/asr"
 ```
 
 Windows x86_64 (PowerShell):
 ```powershell
-$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; $ASR_VERSION="v1.0.1"; New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null; curl.exe -fL -o "$SKILL_DIR\bin\asr-windows-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.zip"; Expand-Archive -Path "$SKILL_DIR\bin\asr-windows-x86_64.zip" -DestinationPath "$SKILL_DIR\bin" -Force; Remove-Item "$SKILL_DIR\bin\asr-windows-x86_64.zip" -Force
+$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; $ASR_VERSION="v1.0.2"; New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null; curl.exe -fL -o "$SKILL_DIR\bin\asr-windows-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.zip"; Expand-Archive -Path "$SKILL_DIR\bin\asr-windows-x86_64.zip" -DestinationPath "$SKILL_DIR\bin" -Force; Remove-Item "$SKILL_DIR\bin\asr-windows-x86_64.zip" -Force
 ```
 
 ---
