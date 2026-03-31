@@ -69,9 +69,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          mkdir -p dist/release
+          cp dist/linux/asr dist/release/asr-linux-x86_64
+          cp dist/macos/asr dist/release/asr-macos-arm64
+          cp dist/windows/asr.exe dist/release/asr-windows-x86_64.exe
+
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --target "$SHA" --title "$TAG" --notes ""
 
-          gh release upload "$TAG" dist/linux/asr#asr-linux-x86_64 --clobber
-          gh release upload "$TAG" dist/macos/asr#asr-macos-arm64 --clobber
-          gh release upload "$TAG" dist/windows/asr.exe#asr-windows-x86_64.exe --clobber
+          gh release upload "$TAG" dist/release/asr-linux-x86_64 --clobber
+          gh release upload "$TAG" dist/release/asr-macos-arm64 --clobber
+          gh release upload "$TAG" dist/release/asr-windows-x86_64.exe --clobber

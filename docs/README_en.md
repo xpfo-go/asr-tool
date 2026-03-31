@@ -33,7 +33,7 @@ Download the platform binary into the Skill directory (pick one for your OS):
 
 ```bash
 SKILL_DIR=~/.claude/skills/asr-tool
-ASR_VERSION=v1.0.0
+ASR_VERSION=v1.0.1
 mkdir -p "$SKILL_DIR/bin"
 
 # macOS arm64
@@ -48,7 +48,7 @@ chmod +x "$SKILL_DIR/bin/asr"
 Windows x86_64 (PowerShell):
 ```powershell
 $SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"
-$ASR_VERSION="v1.0.0"
+$ASR_VERSION="v1.0.1"
 New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null
 curl.exe -fL -o "$SKILL_DIR\bin\asr.exe" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.exe"
 ```
