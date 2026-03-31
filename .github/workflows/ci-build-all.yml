@@ -50,7 +50,7 @@ jobs:
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES='75-real;75-virtual'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES='75-real;75-virtual' -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
@@ -59,7 +59,7 @@ jobs:
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual"
+        run: cmake -B build -A x64 -DASR_ENABLE_CUDA=ON -DGGML_CUDA_FA=OFF -DCMAKE_CUDA_ARCHITECTURES="75-real;75-virtual" -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
@@ -80,6 +80,8 @@ jobs:
           mkdir -p out/linux-x86_64
           cp build/asr out/linux-x86_64/asr
           chmod +x out/linux-x86_64/asr
+          find build -type f \( -name 'libwhisper*.so*' -o -name 'libggml*.so*' \) -exec cp -f {} out/linux-x86_64/ \;
+          (cd out/linux-x86_64 && zip -r ../asr-linux-x86_64.zip .)
 
       - name: Prepare Output (macOS)
         if: runner.os == 'macOS'
@@ -94,13 +96,17 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path out/windows-x86_64 | Out-Null
           Copy-Item build/Release/asr.exe out/windows-x86_64/asr.exe -Force
+          Get-ChildItem -Path build -Recurse -File -Include whisper*.dll,ggml*.dll | ForEach-Object {
+            Copy-Item $_.FullName out/windows-x86_64 -Force
+          }
+          Compress-Archive -Path out/windows-x86_64/* -DestinationPath out/asr-windows-x86_64.zip -Force
 
       - name: Upload Artifact (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: asr-linux-x86_64
-          path: out/linux-x86_64/asr
+          path: out/asr-linux-x86_64.zip
           if-no-files-found: error
 
       - name: Upload Artifact (macOS)
@@ -116,5 +122,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: asr-windows-x86_64
-          path: out/windows-x86_64/asr.exe
+          path: out/asr-windows-x86_64.zip
           if-no-files-found: error

@@ -5,6 +5,8 @@
 #include "transcriber.hpp"
 #include "types.hpp"
 
+#include <ggml-backend.h>
+
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -50,6 +52,15 @@ bool parse_format(const std::string& s, OutputFormat* out) {
         return true;
     }
     return false;
+}
+
+void load_runtime_backends() {
+#if defined(__linux__) || defined(_WIN32)
+    const size_t before = ggml_backend_dev_count();
+    ggml_backend_load_all();
+    const size_t after = ggml_backend_dev_count();
+    (void)fprintf(stderr, "[INFO] 后端加载: %zu -> %zu 个设备\n", before, after);
+#endif
 }
 
 }  // namespace
@@ -154,6 +165,7 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    load_runtime_backends();
     Backend backend = detect_backend();
 
     std::filesystem::path model_path;

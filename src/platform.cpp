@@ -1,5 +1,7 @@
 #include "platform.hpp"
 
+#include <ggml-backend.h>
+
 #include <cstdio>
 
 Backend detect_backend() {
@@ -10,39 +12,29 @@ Backend detect_backend() {
     return Backend::CoreML;
 
 #elif defined(__linux__)
-    // Linux: 优先 CUDA，回退 CPU
+    // Linux: 有可用 GPU backend 时使用 CUDA，否则回退 CPU。
     (void)fprintf(stderr, "[INFO] 检测加速方案: Linux — ");
     (void)fflush(stderr);
 
-    FILE* fp = popen("nvidia-smi -L 2>/dev/null", "r");
-    if (fp) {
-        char buf[256] = {0};
-        if (fgets(buf, sizeof(buf), fp) != nullptr && buf[0] != '\0') {
-            (void)pclose(fp);
-            (void)fprintf(stderr, "检测到 CUDA\n");
-            return Backend::CUDA;
-        }
-        (void)pclose(fp);
+    if (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr ||
+        ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr) {
+        (void)fprintf(stderr, "检测到可用 GPU 后端\n");
+        return Backend::CUDA;
     }
-    (void)fprintf(stderr, "未找到 NVIDIA 驱动，回退到 CPU 模式\n");
+    (void)fprintf(stderr, "未检测到可用 GPU 后端，回退到 CPU 模式\n");
     return Backend::CPU;
 
 #elif defined(_WIN32)
-    // Windows: 优先 CUDA，回退 CPU
+    // Windows: 有可用 GPU backend 时使用 CUDA，否则回退 CPU。
     (void)fprintf(stderr, "[INFO] 检测加速方案: Windows — ");
     (void)fflush(stderr);
 
-    FILE* fp = _popen("nvidia-smi -L 2>NUL", "r");
-    if (fp) {
-        char buf[256] = {0};
-        if (fgets(buf, sizeof(buf), fp) != nullptr && buf[0] != '\0') {
-            (void)_pclose(fp);
-            (void)fprintf(stderr, "检测到 CUDA\n");
-            return Backend::CUDA;
-        }
-        (void)_pclose(fp);
+    if (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr ||
+        ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr) {
+        (void)fprintf(stderr, "检测到可用 GPU 后端\n");
+        return Backend::CUDA;
     }
-    (void)fprintf(stderr, "未找到 NVIDIA 驱动，回退到 CPU 模式\n");
+    (void)fprintf(stderr, "未检测到可用 GPU 后端，回退到 CPU 模式\n");
     return Backend::CPU;
 
 #else

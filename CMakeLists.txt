@@ -74,6 +74,13 @@ if(((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR WIN32) AND ASR_ENABLE_CUDA)
     message(STATUS "Enabled GGML_CUDA for NVIDIA GPU")
 endif()
 
+# Linux/Windows: use dynamic backend loading so CUDA can be optional at runtime
+# (load CUDA backend when available, fallback to CPU when unavailable).
+if((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR WIN32)
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(whisper)
 
 # ============================================================
@@ -93,6 +100,14 @@ target_include_directories(asr PUBLIC
 )
 
 target_link_libraries(asr PUBLIC whisper)
+
+# Keep runtime search path local on Linux so bundled .so files are discovered.
+if(UNIX AND NOT APPLE)
+    set_target_properties(asr PROPERTIES
+        BUILD_RPATH "\$ORIGIN"
+        INSTALL_RPATH "\$ORIGIN"
+    )
+endif()
 
 # macOS 系统框架
 if(APPLE)
