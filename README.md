@@ -20,10 +20,10 @@
 ### 安装 Skill（Claude Code / Codex）
 
 ```bash
-# Claude Code
 git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
+```
 
-# Codex
+```bash
 git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 ```
 
@@ -32,25 +32,16 @@ git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 下载对应平台二进制到 Skill 目录（按你的系统选择一条）：
 
 ```bash
-SKILL_DIR=~/.claude/skills/asr-tool
-ASR_VERSION=v1.0.1
-mkdir -p "$SKILL_DIR/bin"
+SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
+```
 
-# macOS arm64
-curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64"
-chmod +x "$SKILL_DIR/bin/asr"
-
-# Linux x86_64
-curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64"
-chmod +x "$SKILL_DIR/bin/asr"
+```bash
+SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
 
 Windows x86_64（PowerShell）：
 ```powershell
-$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"
-$ASR_VERSION="v1.0.1"
-New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null
-curl.exe -fL -o "$SKILL_DIR\bin\asr.exe" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.exe"
+$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; $ASR_VERSION="v1.0.1"; New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null; curl.exe -fL -o "$SKILL_DIR\bin\asr.exe" "https://github.com/xpfo-go/asr-tool/releases/download/$ASR_VERSION/asr-windows-x86_64.exe"
 ```
 
 ---
@@ -64,22 +55,17 @@ curl.exe -fL -o "$SKILL_DIR\bin\asr.exe" "https://github.com/xpfo-go/asr-tool/re
 
 手动下载（macOS/Linux）：
 ```bash
-mkdir -p ~/.cache/whisper
-curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-q8_0.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-q8_0.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
 ```
 
 macOS 可选：手动下载 CoreML 编码器（`mlmodelc`）
 ```bash
-mkdir -p ~/.cache/whisper
-curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip"
-unzip -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip -d ~/.cache/whisper/
+mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip" && unzip -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip -d ~/.cache/whisper/
 ```
 
 手动下载（Windows PowerShell）：
 ```powershell
-$dir = "$env:USERPROFILE\.cache\whisper"
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
-curl.exe -fL -o "$dir\ggml-large-v3-turbo-q8_0.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+$dir = "$env:USERPROFILE\.cache\whisper"; New-Item -ItemType Directory -Force -Path $dir | Out-Null; curl.exe -fL -o "$dir\ggml-large-v3-turbo-q8_0.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
 ```
 
 ---
@@ -97,19 +83,22 @@ curl.exe -fL -o "$dir\ggml-large-v3-turbo-q8_0.bin" "https://huggingface.co/gger
 ### 2) 使用 asr 二进制
 
 ```bash
-# 最简用法
 asr recording.mp3
+```
 
-# 指定输出文件
+```bash
 asr meeting.m4a -o transcript.txt
+```
 
-# 指定语言 + prompt
+```bash
 asr audio.mp3 -l zh -p "药物名称、检查项目"
+```
 
-# 指定模型目录（目录下放 ggml-large-v3*.bin）
+```bash
 asr audio.mp3 -m /data/models/whisper
+```
 
-# 字幕格式
+```bash
 asr video.mov -f srt -o subtitles.srt
 ```
 
