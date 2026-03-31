@@ -23,7 +23,13 @@ metadata:
 ```
 
 ```bash
+# macOS / Linux
 ASR_BIN="$HOME/.claude/skills/asr-tool/bin/asr"   # 或 ~/.codex/skills/asr-tool/bin/asr 或 ~/.agents/skills/asr-tool/bin/asr
+```
+
+```powershell
+# Windows（注意 .exe）
+$ASR_BIN="$env:USERPROFILE\.claude\skills\asr-tool\bin\asr.exe"   # 或 $env:USERPROFILE\.codex\skills\asr-tool\bin\asr.exe 或 $env:USERPROFILE\.agents\skills\asr-tool\bin\asr.exe
 ```
 
 ### 参数说明
@@ -45,6 +51,9 @@ ASR_BIN="$HOME/.claude/skills/asr-tool/bin/asr"   # 或 ~/.codex/skills/asr-tool
 ```bash
 # 最简用法
 <ASR_BIN> recording.mp3
+
+# 查看版本
+<ASR_BIN> --version
 
 # 指定输出文件
 <ASR_BIN> meeting.m4a -o transcript.txt
