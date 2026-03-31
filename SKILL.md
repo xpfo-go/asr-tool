@@ -16,20 +16,14 @@ metadata:
 
 ## 命令行接口
 
-先定位 Skill 二进制（避免与 macOS 系统 `/usr/sbin/asr` 冲突）：
+请直接使用 Skill 二进制绝对路径（避免与 macOS 系统 `/usr/sbin/asr` 冲突）：
 
 ```bash
-# Claude Code
-ASR_BIN="$HOME/.claude/skills/asr-tool/bin/asr"
-
-# Codex
-ASR_BIN="$HOME/.codex/skills/asr-tool/bin/asr"
+"$HOME/.claude/skills/asr-tool/bin/asr" <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
 ```
 
-后续命令统一使用 `"$ASR_BIN"`，不要直接使用 `asr`。
-
-```
-"$ASR_BIN" <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
+```bash
+"$HOME/.codex/skills/asr-tool/bin/asr" <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
 ```
 
 ### 参数说明
@@ -50,19 +44,19 @@ ASR_BIN="$HOME/.codex/skills/asr-tool/bin/asr"
 
 ```bash
 # 最简用法
-"$ASR_BIN" recording.mp3
+"$HOME/.claude/skills/asr-tool/bin/asr" recording.mp3
 
 # 指定输出文件
-"$ASR_BIN" meeting.m4a -o transcript.txt
+"$HOME/.claude/skills/asr-tool/bin/asr" meeting.m4a -o transcript.txt
 
 # 指定语言与 prompt
-"$ASR_BIN" doctor_recording.mp3 -l zh -p "药物名称、检查项目"
+"$HOME/.claude/skills/asr-tool/bin/asr" doctor_recording.mp3 -l zh -p "药物名称、检查项目"
 
 # 指定模型目录
-"$ASR_BIN" audio.mp3 -m /data/models/whisper
+"$HOME/.claude/skills/asr-tool/bin/asr" audio.mp3 -m /data/models/whisper
 
 # 输出为 SRT 字幕格式
-"$ASR_BIN" video.mov -f srt -o subtitles.srt
+"$HOME/.claude/skills/asr-tool/bin/asr" video.mov -f srt -o subtitles.srt
 ```
 
 ## 输出格式
