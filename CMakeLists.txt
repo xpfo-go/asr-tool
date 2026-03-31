@@ -79,6 +79,8 @@ endif()
 if((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR WIN32)
     set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
     set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+    # GGML_BACKEND_DL is incompatible with GGML_NATIVE in current ggml.
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 endif()
 
 FetchContent_MakeAvailable(whisper)
