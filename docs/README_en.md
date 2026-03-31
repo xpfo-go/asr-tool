@@ -19,10 +19,12 @@ Simple setup: install `ffmpeg` and prepare model files. Large-model friendly: de
 
 ### Install Skill (Claude Code / Codex)
 
+Claude Code:
 ```bash
 git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
 ```
 
+Codex:
 ```bash
 git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 ```
@@ -31,10 +33,12 @@ Some Codex environments use `~/.agents/skills`; adjust the target path if needed
 
 Download the platform binary into the Skill directory (pick one for your OS):
 
+macOS-aarch64:
 ```bash
 SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
 
+Linux-x86_64:
 ```bash
 SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
@@ -58,7 +62,7 @@ Manual download (macOS/Linux):
 mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-q8_0.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
 ```
 
-Optional on macOS: manually download CoreML encoder (`mlmodelc`)
+Optional on macOS: manually download CoreML encoder (`mlmodelc`, the command below downloads the encoder for the `ggml-large-v3-turbo` series)
 ```bash
 mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip" && unzip -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip -d ~/.cache/whisper/
 ```

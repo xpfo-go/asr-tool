@@ -19,10 +19,12 @@
 
 ### 安装 Skill（Claude Code / Codex）
 
+Claude Code：
 ```bash
 git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
 ```
 
+Codex：
 ```bash
 git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 ```
@@ -31,10 +33,12 @@ git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
 
 下载对应平台二进制到 Skill 目录（按你的系统选择一条）：
 
+macOS-aarch64：
 ```bash
 SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
 
+Linux-x86_64：
 ```bash
 SKILL_DIR=~/.claude/skills/asr-tool ASR_VERSION=v1.0.1 && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/download/${ASR_VERSION}/asr-linux-x86_64" && chmod +x "$SKILL_DIR/bin/asr"
 ```
@@ -58,7 +62,7 @@ $SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; $ASR_VERSION="v1.0.1"; Ne
 mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-q8_0.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
 ```
 
-macOS 可选：手动下载 CoreML 编码器（`mlmodelc`）
+macOS 可选：手动下载 CoreML 编码器（`mlmodelc`，以下命令下载的是 `ggml-large-v3-turbo` 系列对应编码器）
 ```bash
 mkdir -p ~/.cache/whisper && curl -fL -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip" && unzip -o ~/.cache/whisper/ggml-large-v3-turbo-encoder.mlmodelc.zip -d ~/.cache/whisper/
 ```
