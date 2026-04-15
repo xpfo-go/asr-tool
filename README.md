@@ -27,6 +27,7 @@ curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.
 
 - 自动探测 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`、`~/.gemini/skills`、`~/.openclaw/skills`、`~/.hermes/skills`
 - 交互式多选安装目标；默认全选全部已检测到的 Skill 目录
+- 选择界面支持 `Up/Down` 移动、`Space` 勾选/取消、`a` 全选或全不选、`Enter` 确认
 - Skill 目录统一安装或更新到 GitHub `latest release`
 - 全局共享二进制安装到 `~/.local/bin/asr-tool`
 - 全局共享模型目录使用 `~/.cache/whisper/`

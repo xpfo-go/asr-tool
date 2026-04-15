@@ -223,10 +223,58 @@ prompt_output_path() {
   fi
 }
 
+all_selected_indexes() {
+  local count index selected
+  count="$1"
+  selected=","
+
+  for ((index = 0; index < count; index++)); do
+    selected="${selected}${index},"
+  done
+
+  printf '%s\n' "$selected"
+}
+
+selection_contains() {
+  local index selected_indexes
+  index="$1"
+  selected_indexes="$2"
+  [[ "$selected_indexes" == *",$index,"* ]]
+}
+
+toggle_selection_index() {
+  local index selected_indexes
+  index="$1"
+  selected_indexes="$2"
+
+  if selection_contains "$index" "$selected_indexes"; then
+    selected_indexes="${selected_indexes//,$index,/,}"
+    printf '%s\n' "$selected_indexes"
+    return
+  fi
+
+  printf '%s%s,\n' "$selected_indexes" "$index"
+}
+
+toggle_all_selection_indexes() {
+  local count selected_indexes
+  count="$1"
+  selected_indexes="$2"
+
+  if [[ "$selected_indexes" == "$(all_selected_indexes "$count")" ]]; then
+    printf '%s\n' ','
+    return
+  fi
+
+  all_selected_indexes "$count"
+}
+
 prompt_for_targets() {
-  local -a detected tokens
-  local selection selection_lower token index prompt_in prompt_out
-  local chosen_indexes
+  local -a detected
+  local selection prompt_in prompt_out current_index key key_2 key_3
+  local selected_indexes status_message menu_lines
+  local label root_dir marker cursor_prefix
+  local index
 
   while IFS= read -r selection; do
     detected+=("$selection")
@@ -247,33 +295,84 @@ prompt_for_targets() {
     return
   fi
 
-  {
-    printf 'Detected skill roots (default: all):\n'
-  for index in "${!detected[@]}"; do
-    printf '  [x] %d) %s (%s)\n' \
-      "$((index + 1))" \
-      "${detected[index]%%|*}" \
-      "${detected[index]#*|}"
+  current_index=0
+  selected_indexes="$(all_selected_indexes "${#detected[@]}")"
+  menu_lines=$((${#detected[@]} + 2))
+
+  exec 3< "$prompt_in"
+  exec 4> "$prompt_out"
+
+  while true; do
+    printf '\r' >&4
+    printf '\033[J' >&4
+    printf 'Detected skill roots (default: all)\n' >&4
+    for index in "${!detected[@]}"; do
+      label="${detected[index]%%|*}"
+      root_dir="${detected[index]#*|}"
+      if selection_contains "$index" "$selected_indexes"; then
+        marker='x'
+      else
+        marker=' '
+      fi
+      if (( index == current_index )); then
+        cursor_prefix='>'
+      else
+        cursor_prefix=' '
+      fi
+      printf '%s [%s] %s (%s)\n' "$cursor_prefix" "$marker" "$label" "$root_dir" >&4
+    done
+    if [[ -n "$status_message" ]]; then
+      printf '%s\n' "$status_message" >&4
+    else
+      printf 'Use Up/Down to move, Space to toggle, a to toggle all, Enter to confirm.\n' >&4
+    fi
+
+    if ! IFS= read -r -s -n1 -u 3 key; then
+      break
+    fi
+
+    status_message=''
+    case "$key" in
+      ''|$'\n'|$'\r')
+        if [[ "$selected_indexes" == ',' ]]; then
+          status_message='Select at least one target before confirming.'
+        else
+          break
+        fi
+        ;;
+      ' ')
+        selected_indexes="$(toggle_selection_index "$current_index" "$selected_indexes")"
+        ;;
+      'a'|'A')
+        selected_indexes="$(toggle_all_selection_indexes "${#detected[@]}" "$selected_indexes")"
+        ;;
+      'j')
+        current_index=$(((current_index + 1) % ${#detected[@]}))
+        ;;
+      'k')
+        current_index=$(((current_index + ${#detected[@]} - 1) % ${#detected[@]}))
+        ;;
+      $'\033')
+        if IFS= read -r -s -n1 -u 3 key_2 && [[ "$key_2" == '[' ]] && \
+          IFS= read -r -s -n1 -u 3 key_3; then
+          case "$key_3" in
+            'A') current_index=$(((current_index + ${#detected[@]} - 1) % ${#detected[@]})) ;;
+            'B') current_index=$(((current_index + 1) % ${#detected[@]})) ;;
+          esac
+        fi
+        ;;
+    esac
+
+    printf '\033[%dA' "$menu_lines" >&4
   done
-  printf 'Select targets [all]: '
-  } > "$prompt_out"
-  read -r selection < "$prompt_in"
-  selection="${selection// /}"
-  selection_lower="$(printf '%s' "$selection" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ -z "$selection" || "$selection_lower" == 'all' ]]; then
-    printf '%s\n' "${detected[@]}"
-    return
-  fi
+  printf '\n' >&4
+  exec 3<&-
+  exec 4>&-
 
-  IFS=',' read -r -a tokens <<< "$selection"
-  for token in "${tokens[@]}"; do
-    [[ "$token" =~ ^[0-9]+$ ]] || die "Invalid selection: $token"
-    index=$((token - 1))
-    (( index >= 0 && index < ${#detected[@]} )) || die "Selection out of range: $token"
-    if [[ ",${chosen_indexes}," != *",${index},"* ]]; then
+  for index in "${!detected[@]}"; do
+    if selection_contains "$index" "$selected_indexes"; then
       printf '%s\n' "${detected[index]}"
-      chosen_indexes="${chosen_indexes},${index}"
     fi
   done
 }

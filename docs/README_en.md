@@ -27,6 +27,7 @@ The installer automatically:
 
 - Detects `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.gemini/skills`, `~/.openclaw/skills`, and `~/.hermes/skills`
 - Shows an interactive multi-select list and defaults to installing into every detected Skill root
+- The selector supports `Up/Down` to move, `Space` to toggle, `a` to toggle all, and `Enter` to confirm
 - Installs or updates each selected Skill directory to the GitHub `latest release`
 - Installs one shared binary at `~/.local/bin/asr-tool`
 - Reuses one shared model directory at `~/.cache/whisper/`

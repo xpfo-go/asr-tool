@@ -93,7 +93,7 @@ assert_eq "3" "${#selected_targets[@]}"
 
 prompt_input_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-prompt-in.XXXXXX")"
 prompt_output_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-prompt-out.XXXXXX")"
-printf '2\n' > "$prompt_input_file"
+printf 'a\033[B \n' > "$prompt_input_file"
 interactive_targets=()
 while IFS= read -r interactive_target; do
   interactive_targets+=("$interactive_target")
@@ -104,7 +104,8 @@ done < <(
 )
 assert_eq "1" "${#interactive_targets[@]}"
 assert_eq "OpenClaw|$temp_home/.openclaw/skills" "${interactive_targets[0]}"
-rg -F 'Detected skill roots (default: all):' "$prompt_output_file" >/dev/null
+rg -F 'Detected skill roots (default: all)' "$prompt_output_file" >/dev/null
+rg -F 'Use Up/Down to move, Space to toggle, a to toggle all, Enter to confirm.' "$prompt_output_file" >/dev/null
 rm -f "$prompt_input_file" "$prompt_output_file"
 
 assert_eq "$temp_home/.zshrc" "$(choose_shell_rc_file /bin/zsh)"
