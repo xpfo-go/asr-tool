@@ -165,5 +165,6 @@ ensure_line_in_file "$temp_home/.zshrc" "$PATH_EXPORT_LINE"
 rg -F 'export PATH="$HOME/.local/bin:$PATH"' "$temp_home/.zshrc" >/dev/null
 
 rg -n 'install\.sh' "$repo_root/.github/workflows/release-from-artifacts.yml" >/dev/null
+rg -n 'fetch-depth:[[:space:]]*0' "$repo_root/.github/workflows/ci-build-all.yml" >/dev/null
 rg -n 'curl -fsSL .*install\.sh \| bash' "$repo_root/README.md" >/dev/null
 rg -n 'curl -fsSL .*install\.sh \| bash' "$repo_root/docs/README_en.md" >/dev/null
