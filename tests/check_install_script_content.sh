@@ -48,6 +48,24 @@ assert_eq "1" "$stdin_status"
   exit 1
 }
 
+legacy_root="$(mktemp -d "${TMPDIR:-/tmp}/asr-tool-legacy.XXXXXX")"
+legacy_skill_dir="$legacy_root/asr-tool"
+unrelated_dir="$legacy_root/unrelated"
+mkdir -p "$legacy_skill_dir/src" "$unrelated_dir"
+touch "$legacy_skill_dir/SKILL.md" "$legacy_skill_dir/README.md" "$legacy_skill_dir/CMakeLists.txt" "$legacy_skill_dir/src/main.cpp"
+looks_like_legacy_skill_dir "$legacy_skill_dir"
+! looks_like_legacy_skill_dir "$unrelated_dir"
+legacy_backup_dir="$(backup_legacy_skill_dir "$legacy_skill_dir")"
+[[ ! -e "$legacy_skill_dir" ]] || {
+  echo "legacy skill dir was not moved away"
+  exit 1
+}
+[[ -f "$legacy_backup_dir/SKILL.md" ]] || {
+  echo "legacy skill backup missing expected contents"
+  exit 1
+}
+rm -rf "$legacy_root"
+
 assert_eq "asr-tool-macos-arm64" "$(release_asset_name macOS arm64)"
 assert_eq "asr-tool-linux-x86_64.zip" "$(release_asset_name Linux x86_64)"
 assert_eq "asr-tool-windows-x86_64.zip" "$(release_asset_name Windows x86_64)"

@@ -278,8 +278,35 @@ ensure_clean_managed_repo() {
   fi
 }
 
+looks_like_legacy_skill_dir() {
+  local skill_dir
+  skill_dir="$1"
+
+  [[ -f "$skill_dir/SKILL.md" ]] || return 1
+  [[ -f "$skill_dir/README.md" ]] || return 1
+  [[ -f "$skill_dir/CMakeLists.txt" ]] || return 1
+  [[ -d "$skill_dir/src" || -d "$skill_dir/bin" ]] || return 1
+  return 0
+}
+
+backup_legacy_skill_dir() {
+  local skill_dir backup_dir stamp suffix
+  skill_dir="$1"
+  stamp="$(date +%Y%m%d%H%M%S 2>/dev/null || printf '%s' "$$")"
+  backup_dir="${skill_dir}.backup-${stamp}"
+  suffix=0
+
+  while [[ -e "$backup_dir" ]]; do
+    suffix=$((suffix + 1))
+    backup_dir="${skill_dir}.backup-${stamp}-${suffix}"
+  done
+
+  mv "$skill_dir" "$backup_dir"
+  printf '%s\n' "$backup_dir"
+}
+
 install_or_update_skill() {
-  local label root_dir release_tag skill_dir current_tag
+  local label root_dir release_tag skill_dir current_tag backup_dir
   label="$1"
   root_dir="$2"
   release_tag="$3"
@@ -289,9 +316,18 @@ install_or_update_skill() {
     die "$skill_dir exists but is not a directory"
   fi
 
+  if [[ -d "$skill_dir" ]] && ! git -C "$skill_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if looks_like_legacy_skill_dir "$skill_dir"; then
+      backup_dir="$(backup_legacy_skill_dir "$skill_dir")"
+      warn "$skill_dir is a legacy non-git install; backed it up to $backup_dir"
+    else
+      die "$skill_dir exists but is not a git repository"
+    fi
+  fi
+
   if [[ ! -d "$skill_dir" ]]; then
     log "Installing ${label} Skill into $skill_dir"
-    git clone --depth 1 --branch "$release_tag" --single-branch \
+    git -c advice.detachedHead=false clone --depth 1 --branch "$release_tag" --single-branch \
       "$REPO_URL" "$skill_dir"
     return
   fi
@@ -305,7 +341,7 @@ install_or_update_skill() {
 
   log "Updating ${label} Skill to ${release_tag}"
   git -C "$skill_dir" fetch --force --tags origin
-  git -C "$skill_dir" checkout --force "$release_tag"
+  git -c advice.detachedHead=false -C "$skill_dir" checkout --force "$release_tag"
   git -C "$skill_dir" reset --hard "$release_tag"
 }
 
