@@ -90,6 +90,23 @@ while IFS= read -r selected_target; do
   selected_targets+=("$selected_target")
 done < <(prompt_for_targets)
 assert_eq "3" "${#selected_targets[@]}"
+
+prompt_input_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-prompt-in.XXXXXX")"
+prompt_output_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-prompt-out.XXXXXX")"
+printf '2\n' > "$prompt_input_file"
+interactive_targets=()
+while IFS= read -r interactive_target; do
+  interactive_targets+=("$interactive_target")
+done < <(
+  ASR_TOOL_PROMPT_INPUT="$prompt_input_file" \
+  ASR_TOOL_PROMPT_OUTPUT="$prompt_output_file" \
+  prompt_for_targets
+)
+assert_eq "1" "${#interactive_targets[@]}"
+assert_eq "OpenClaw|$temp_home/.openclaw/skills" "${interactive_targets[0]}"
+rg -F 'Detected skill roots (default: all):' "$prompt_output_file" >/dev/null
+rm -f "$prompt_input_file" "$prompt_output_file"
+
 assert_eq "$temp_home/.zshrc" "$(choose_shell_rc_file /bin/zsh)"
 assert_eq "$temp_home/.bashrc" "$(choose_shell_rc_file /bin/bash)"
 ensure_line_in_file "$temp_home/.zshrc" "$PATH_EXPORT_LINE"

@@ -201,9 +201,31 @@ detect_skill_roots() {
   done
 }
 
+prompt_input_path() {
+  if [[ -n "${ASR_TOOL_PROMPT_INPUT:-}" ]]; then
+    printf '%s\n' "$ASR_TOOL_PROMPT_INPUT"
+    return
+  fi
+
+  if { true < /dev/tty; } 2>/dev/null; then
+    printf '%s\n' '/dev/tty'
+  fi
+}
+
+prompt_output_path() {
+  if [[ -n "${ASR_TOOL_PROMPT_OUTPUT:-}" ]]; then
+    printf '%s\n' "$ASR_TOOL_PROMPT_OUTPUT"
+    return
+  fi
+
+  if { true > /dev/tty; } 2>/dev/null; then
+    printf '%s\n' '/dev/tty'
+  fi
+}
+
 prompt_for_targets() {
   local -a detected tokens
-  local selection selection_lower token index
+  local selection selection_lower token index prompt_in prompt_out
   local chosen_indexes
 
   while IFS= read -r selection; do
@@ -213,12 +235,20 @@ prompt_for_targets() {
     die "No supported skill roots detected under ~/.claude/skills, ~/.codex/skills, ~/.agents/skills, ~/.gemini/skills, ~/.openclaw/skills, or ~/.hermes/skills"
   fi
 
-  if [[ ! -t 0 || ! -t 1 || "${ASR_TOOL_ASSUME_YES:-0}" == "1" ]]; then
+  if [[ "${ASR_TOOL_ASSUME_YES:-0}" == "1" ]]; then
     printf '%s\n' "${detected[@]}"
     return
   fi
 
-  printf 'Detected skill roots (default: all):\n'
+  prompt_in="$(prompt_input_path)"
+  prompt_out="$(prompt_output_path)"
+  if [[ -z "$prompt_in" || -z "$prompt_out" ]]; then
+    printf '%s\n' "${detected[@]}"
+    return
+  fi
+
+  {
+    printf 'Detected skill roots (default: all):\n'
   for index in "${!detected[@]}"; do
     printf '  [x] %d) %s (%s)\n' \
       "$((index + 1))" \
@@ -226,7 +256,8 @@ prompt_for_targets() {
       "${detected[index]#*|}"
   done
   printf 'Select targets [all]: '
-  read -r selection
+  } > "$prompt_out"
+  read -r selection < "$prompt_in"
   selection="${selection// /}"
   selection_lower="$(printf '%s' "$selection" | tr '[:upper:]' '[:lower:]')"
 
