@@ -15,9 +15,9 @@
 
 ---
 
-## 1. Skill 安装
+## 1. 一键安装 / 更新
 
-推荐直接使用 latest release 的一键安装脚本：
+推荐直接使用 latest release 的一键安装脚本；再次执行同一条命令时，会自动更新到最新 release：
 
 ```bash
 curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.sh | bash
@@ -38,6 +38,7 @@ curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.
 - macOS / Linux：直接在终端运行上面的命令
 - Windows：请在 Git Bash 中运行上面的命令；安装完成后 PowerShell 和 `cmd` 里也可以直接执行 `asr-tool`
 - 若某个已存在的 Skill 目录有未提交改动，安装脚本会直接报错，不会覆盖你的本地修改
+- 旧的“手动 `git clone` + 手动下载二进制”方式不再推荐
 
 ---
 

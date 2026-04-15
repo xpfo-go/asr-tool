@@ -15,7 +15,7 @@
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.18)
-project(asr-tool VERSION 1.0.0 LANGUAGES C CXX)
+project(asr-tool VERSION 1.0.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,22 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(ASR_TARGET_NAME asr_tool)
 set(ASR_BINARY_NAME asr-tool)
 set(ASR_LEGACY_BINARY_NAME asr)
+set(ASR_APP_VERSION "${PROJECT_VERSION}")
+
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}" describe --tags --dirty --always
+        OUTPUT_VARIABLE ASR_GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(ASR_GIT_DESCRIBE)
+        string(REGEX REPLACE "^v" "" ASR_APP_VERSION "${ASR_GIT_DESCRIBE}")
+    endif()
+endif()
+
+message(STATUS "asr-tool version: ${ASR_APP_VERSION}")
 
 # 平台检测
 if(APPLE)
@@ -140,6 +156,7 @@ target_compile_options(${ASR_TARGET_NAME} PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
+target_compile_definitions(${ASR_TARGET_NAME} PRIVATE ASR_VERSION="${ASR_APP_VERSION}")
 
 # 安装目标
 install(TARGETS ${ASR_TARGET_NAME} RUNTIME DESTINATION bin)

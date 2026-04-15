@@ -55,8 +55,12 @@ if [[ -e "$legacy_bin" ]]; then
 fi
 
 version_output="$($expected_bin --version)"
-if [[ "$version_output" != asr-tool\ * ]]; then
+expected_version="$(git -C "$source_dir" describe --tags --dirty --always 2>/dev/null | sed 's/^v//')"
+expected_output="asr-tool ${expected_version}"
+
+if [[ "$version_output" != "$expected_output" ]]; then
   echo "unexpected version output: $version_output"
+  echo "expected version output: $expected_output"
   exit 1
 fi
 

@@ -12,9 +12,11 @@
 #include <string>
 #include <vector>
 
-namespace {
+#ifndef ASR_VERSION
+#define ASR_VERSION "unknown"
+#endif
 
-constexpr const char* VERSION = "1.0.0";
+namespace {
 
 void print_help(const char* prog) {
     (void)fprintf(stderr,
@@ -82,7 +84,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         if (arg == "--version") {
-            (void)printf("asr-tool %s\n", VERSION);
+            (void)printf("asr-tool %s\n", ASR_VERSION);
             return 0;
         }
         if (arg == "-v" || arg == "--verbose") {

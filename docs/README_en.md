@@ -15,9 +15,9 @@ Simple setup: install `ffmpeg` and prepare model files. Large-model friendly: de
 
 ---
 
-## 1. Skill Installation
+## 1. One-Line Install / Update
 
-Recommended: use the one-line installer from the latest release:
+Recommended: use the one-line installer from the latest release. Re-running the same command updates everything to the newest release automatically:
 
 ```bash
 curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.sh | bash
@@ -38,6 +38,7 @@ Notes:
 - macOS / Linux: run the command above in your terminal
 - Windows: run it in Git Bash; after installation, `asr-tool` is available from Git Bash, PowerShell, and `cmd`
 - If an existing Skill directory has local modifications, the installer exits with an error instead of overwriting your changes
+- The old manual `git clone` + manual binary download flow is no longer the recommended path
 
 ---
 
