@@ -628,6 +628,6 @@ main() {
   printf 'Open a new terminal or source your shell rc file if the PATH change is not visible yet.\n'
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" && -z "${ASR_TOOL_INSTALL_SOURCE_ONLY:-}" ]]; then
+if [[ "${BASH_SOURCE[0]-}" == "$0" && -z "${ASR_TOOL_INSTALL_SOURCE_ONLY:-}" ]]; then
   main "$@"
 fi

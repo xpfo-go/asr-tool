@@ -20,6 +20,7 @@ assert_eq() {
 }
 
 ASR_TOOL_INSTALL_SOURCE_ONLY=1 source "$script_path"
+ASR_TOOL_INSTALL_SOURCE_ONLY=1 bash < "$script_path" >/dev/null
 
 assert_eq "asr-tool-macos-arm64" "$(release_asset_name macOS arm64)"
 assert_eq "asr-tool-linux-x86_64.zip" "$(release_asset_name Linux x86_64)"
