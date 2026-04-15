@@ -10,14 +10,24 @@ on:
       - include/**
       - src/**
       - scripts/**
+      - install.sh
+      - README.md
+      - docs/**
+      - SKILL.md
       - .github/workflows/ci-build-all.yml
+      - .github/workflows/release-from-artifacts.yml
   pull_request:
     paths:
       - CMakeLists.txt
       - include/**
       - src/**
       - scripts/**
+      - install.sh
+      - README.md
+      - docs/**
+      - SKILL.md
       - .github/workflows/ci-build-all.yml
+      - .github/workflows/release-from-artifacts.yml
 
 permissions:
   contents: read
@@ -78,49 +88,49 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p out/linux-x86_64
-          cp build/asr out/linux-x86_64/asr
-          chmod +x out/linux-x86_64/asr
+          cp build/asr-tool out/linux-x86_64/asr-tool
+          chmod +x out/linux-x86_64/asr-tool
           find build -type f \( -name 'libwhisper*.so*' -o -name 'libggml*.so*' \) -exec cp -f {} out/linux-x86_64/ \;
-          (cd out/linux-x86_64 && zip -r ../asr-linux-x86_64.zip .)
+          (cd out/linux-x86_64 && zip -r ../asr-tool-linux-x86_64.zip .)
 
       - name: Prepare Output (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p out/macos-arm64
-          cp build/asr out/macos-arm64/asr
-          chmod +x out/macos-arm64/asr
+          cp build/asr-tool out/macos-arm64/asr-tool
+          chmod +x out/macos-arm64/asr-tool
 
       - name: Prepare Output (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out/windows-x86_64 | Out-Null
-          Copy-Item build/Release/asr.exe out/windows-x86_64/asr.exe -Force
+          Copy-Item build/Release/asr-tool.exe out/windows-x86_64/asr-tool.exe -Force
           Get-ChildItem -Path build -Recurse -File -Include whisper*.dll,ggml*.dll | ForEach-Object {
             Copy-Item $_.FullName out/windows-x86_64 -Force
           }
-          Compress-Archive -Path out/windows-x86_64/* -DestinationPath out/asr-windows-x86_64.zip -Force
+          Compress-Archive -Path out/windows-x86_64/* -DestinationPath out/asr-tool-windows-x86_64.zip -Force
 
       - name: Upload Artifact (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: asr-linux-x86_64
-          path: out/asr-linux-x86_64.zip
+          name: asr-tool-linux-x86_64
+          path: out/asr-tool-linux-x86_64.zip
           if-no-files-found: error
 
       - name: Upload Artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: asr-macos-arm64
-          path: out/macos-arm64/asr
+          name: asr-tool-macos-arm64
+          path: out/macos-arm64/asr-tool
           if-no-files-found: error
 
       - name: Upload Artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: asr-windows-x86_64
-          path: out/asr-windows-x86_64.zip
+          name: asr-tool-windows-x86_64
+          path: out/asr-tool-windows-x86_64.zip
           if-no-files-found: error

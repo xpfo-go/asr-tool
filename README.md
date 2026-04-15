@@ -17,42 +17,33 @@
 
 ## 1. Skill 安装
 
-### 安装 Skill（Claude Code / Codex）
+推荐直接使用 latest release 的一键安装脚本：
 
-Claude Code：
 ```bash
-git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
+curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.sh | bash
 ```
 
-Codex：
-```bash
-git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
-```
+脚本会自动完成这些事情：
 
-部分 Codex 环境使用 `~/.agents/skills`，请按实际路径放置。
+- 自动探测 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills`、`~/.gemini/skills`、`~/.openclaw/skills`、`~/.hermes/skills`
+- 交互式多选安装目标；默认全选全部已检测到的 Skill 目录
+- Skill 目录统一安装或更新到 GitHub `latest release`
+- 全局共享二进制安装到 `~/.local/bin/asr-tool`
+- 全局共享模型目录使用 `~/.cache/whisper/`
+- 自动尝试安装 `ffmpeg`；若包管理器不可用则提示手动安装
+- 若 `~/.local/bin` 不在 `PATH`，自动写入 shell 配置
 
-下载对应平台二进制到 Skill 目录（按你的系统选择一条，Linux/Windows 为 zip 下载后自动解压）：
+说明：
 
-将 `SKILL_DIR` 替换为你的实际 Skill 路径（例如 `~/.claude/skills/asr-tool`、`~/.codex/skills/asr-tool` 或 `~/.agents/skills/asr-tool`）。
-
-macOS-aarch64：
-```bash
-SKILL_DIR=~/.claude/skills/asr-tool && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
-```
-
-Linux-x86_64：
-```bash
-SKILL_DIR=~/.claude/skills/asr-tool && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-linux-x86_64.zip" && unzip -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" -d "$SKILL_DIR/bin" && rm -f "$SKILL_DIR/bin/asr-linux-x86_64.zip" && chmod +x "$SKILL_DIR/bin/asr"
-```
-
-Windows x86_64（PowerShell）：
-```powershell
-$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null; curl.exe -fL -o "$SKILL_DIR\bin\asr-windows-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-windows-x86_64.zip"; Expand-Archive -Path "$SKILL_DIR\bin\asr-windows-x86_64.zip" -DestinationPath "$SKILL_DIR\bin" -Force; Remove-Item "$SKILL_DIR\bin\asr-windows-x86_64.zip" -Force
-```
+- macOS / Linux：直接在终端运行上面的命令
+- Windows：请在 Git Bash 中运行上面的命令；安装完成后 PowerShell 和 `cmd` 里也可以直接执行 `asr-tool`
+- 若某个已存在的 Skill 目录有未提交改动，安装脚本会直接报错，不会覆盖你的本地修改
 
 ---
 
-## 2. 模型（推荐手动下载到 `.cache`）
+## 2. 模型
+
+安装脚本会先检查 `~/.cache/whisper/` 中是否已经存在 `ggml-large-v3*.bin`。如果没有，会自动下载默认模型 `ggml-large-v3-turbo-q8_0.bin`。
 
 - 默认模型：`ggml-large-v3-turbo-q8_0.bin`（约 800MB）
 - 默认目录：macOS/Linux `~/.cache/whisper/`，Windows `%USERPROFILE%\\.cache\\whisper\\`
@@ -86,26 +77,26 @@ $dir = "$env:USERPROFILE\.cache\whisper"; New-Item -ItemType Directory -Force -P
 请把 /path/video_path.mp4 提取文字。
 ```
 
-### 2) 使用 asr 二进制
+### 2) 使用 asr-tool 二进制
 
 ```bash
-asr recording.mp3
+asr-tool recording.mp3
 ```
 
 ```bash
-asr meeting.m4a -o transcript.txt
+asr-tool meeting.m4a -o transcript.txt
 ```
 
 ```bash
-asr audio.mp3 -l zh -p "药物名称、检查项目"
+asr-tool audio.mp3 -l zh -p "药物名称、检查项目"
 ```
 
 ```bash
-asr audio.mp3 -m /data/models/whisper
+asr-tool audio.mp3 -m /data/models/whisper
 ```
 
 ```bash
-asr video.mov -f srt -o subtitles.srt
+asr-tool video.mov -f srt -o subtitles.srt
 ```
 
 默认 `text`（`.txt`）输出按转写片段分行。

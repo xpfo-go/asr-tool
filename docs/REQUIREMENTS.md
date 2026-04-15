@@ -23,7 +23,7 @@
 ## 3. 命令行接口
 
 ```
-asr <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-f <格式>] [-v]
+asr-tool <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-f <格式>] [-v]
 ```
 
 ### 参数
@@ -43,19 +43,19 @@ asr <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-f <格式>]
 
 ```bash
 # 最简用法
-asr recording.mp3
+asr-tool recording.mp3
 
 # 指定输出文件
-asr meeting.m4a -o transcript.txt
+asr-tool meeting.m4a -o transcript.txt
 
 # 指定语言 + prompt
-asr doctor_recording.mp3 -l zh -p "药物名称、检查项目"
+asr-tool doctor_recording.mp3 -l zh -p "药物名称、检查项目"
 
 # 输出 SRT 字幕
-asr video.mov -f srt -o subtitles.srt
+asr-tool video.mov -f srt -o subtitles.srt
 
 # 显示详细日志
-asr audio.wav -v
+asr-tool audio.wav -v
 ```
 
 ### Prompt 使用技巧

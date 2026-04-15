@@ -17,42 +17,33 @@ Simple setup: install `ffmpeg` and prepare model files. Large-model friendly: de
 
 ## 1. Skill Installation
 
-### Install Skill (Claude Code / Codex)
+Recommended: use the one-line installer from the latest release:
 
-Claude Code:
 ```bash
-git clone https://github.com/xpfo-go/asr-tool.git ~/.claude/skills/asr-tool
+curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.sh | bash
 ```
 
-Codex:
-```bash
-git clone https://github.com/xpfo-go/asr-tool.git ~/.codex/skills/asr-tool
-```
+The installer automatically:
 
-Some Codex environments use `~/.agents/skills`; adjust the target path if needed.
+- Detects `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, `~/.gemini/skills`, `~/.openclaw/skills`, and `~/.hermes/skills`
+- Shows an interactive multi-select list and defaults to installing into every detected Skill root
+- Installs or updates each selected Skill directory to the GitHub `latest release`
+- Installs one shared binary at `~/.local/bin/asr-tool`
+- Reuses one shared model directory at `~/.cache/whisper/`
+- Tries to install `ffmpeg` automatically and falls back to manual instructions only if no package manager is available
+- Adds `~/.local/bin` to PATH automatically when needed
 
-Download the platform binary into the Skill directory (pick one for your OS; Linux/Windows are downloaded as zip and extracted automatically):
+Notes:
 
-Replace `SKILL_DIR` with your actual Skill path (for example `~/.claude/skills/asr-tool`, `~/.codex/skills/asr-tool`, or `~/.agents/skills/asr-tool`).
-
-macOS-aarch64:
-```bash
-SKILL_DIR=~/.claude/skills/asr-tool && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-macos-arm64" && chmod +x "$SKILL_DIR/bin/asr"
-```
-
-Linux-x86_64:
-```bash
-SKILL_DIR=~/.claude/skills/asr-tool && mkdir -p "$SKILL_DIR/bin" && curl -fL -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-linux-x86_64.zip" && unzip -o "$SKILL_DIR/bin/asr-linux-x86_64.zip" -d "$SKILL_DIR/bin" && rm -f "$SKILL_DIR/bin/asr-linux-x86_64.zip" && chmod +x "$SKILL_DIR/bin/asr"
-```
-
-Windows x86_64 (PowerShell):
-```powershell
-$SKILL_DIR="$env:USERPROFILE\.claude\skills\asr-tool"; New-Item -ItemType Directory -Force -Path "$SKILL_DIR\bin" | Out-Null; curl.exe -fL -o "$SKILL_DIR\bin\asr-windows-x86_64.zip" "https://github.com/xpfo-go/asr-tool/releases/latest/download/asr-windows-x86_64.zip"; Expand-Archive -Path "$SKILL_DIR\bin\asr-windows-x86_64.zip" -DestinationPath "$SKILL_DIR\bin" -Force; Remove-Item "$SKILL_DIR\bin\asr-windows-x86_64.zip" -Force
-```
+- macOS / Linux: run the command above in your terminal
+- Windows: run it in Git Bash; after installation, `asr-tool` is available from Git Bash, PowerShell, and `cmd`
+- If an existing Skill directory has local modifications, the installer exits with an error instead of overwriting your changes
 
 ---
 
-## 2. Model (Recommended: manually place in `.cache`)
+## 2. Model
+
+The installer first checks `~/.cache/whisper/` for any `ggml-large-v3*.bin` file. If none exists, it downloads the default `ggml-large-v3-turbo-q8_0.bin` model automatically.
 
 - Default model: `ggml-large-v3-turbo-q8_0.bin` (~800MB)
 - Default directory: macOS/Linux `~/.cache/whisper/`, Windows `%USERPROFILE%\\.cache\\whisper\\`
@@ -86,26 +77,26 @@ You can use a direct prompt, for example:
 Please transcribe /path/video_path.mp4 to text.
 ```
 
-### 2) asr Binary
+### 2) asr-tool Binary
 
 ```bash
-asr recording.mp3
+asr-tool recording.mp3
 ```
 
 ```bash
-asr meeting.m4a -o transcript.txt
+asr-tool meeting.m4a -o transcript.txt
 ```
 
 ```bash
-asr audio.mp3 -l zh -p "drug names, test items"
+asr-tool audio.mp3 -l zh -p "drug names, test items"
 ```
 
 ```bash
-asr audio.mp3 -m /data/models/whisper
+asr-tool audio.mp3 -m /data/models/whisper
 ```
 
 ```bash
-asr video.mov -f srt -o subtitles.srt
+asr-tool video.mov -f srt -o subtitles.srt
 ```
 
 Default `text` (`.txt`) output is written line-by-line by transcription segment.

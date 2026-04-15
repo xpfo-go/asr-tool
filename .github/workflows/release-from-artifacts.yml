@@ -40,7 +40,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v6
         with:
           run_id: ${{ github.event.workflow_run.id }}
-          name: asr-linux-x86_64
+          name: asr-tool-linux-x86_64
           path: dist/linux
 
       - name: Download Artifact (macOS)
@@ -48,7 +48,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v6
         with:
           run_id: ${{ github.event.workflow_run.id }}
-          name: asr-macos-arm64
+          name: asr-tool-macos-arm64
           path: dist/macos
 
       - name: Download Artifact (Windows)
@@ -56,7 +56,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v6
         with:
           run_id: ${{ github.event.workflow_run.id }}
-          name: asr-windows-x86_64
+          name: asr-tool-windows-x86_64
           path: dist/windows
 
       - name: Create or Update Release
@@ -70,13 +70,15 @@ jobs:
           set -euo pipefail
 
           mkdir -p dist/release
-          cp dist/linux/asr-linux-x86_64.zip dist/release/asr-linux-x86_64.zip
-          cp dist/macos/asr dist/release/asr-macos-arm64
-          cp dist/windows/asr-windows-x86_64.zip dist/release/asr-windows-x86_64.zip
+          cp dist/linux/asr-tool-linux-x86_64.zip dist/release/asr-tool-linux-x86_64.zip
+          cp dist/macos/asr-tool dist/release/asr-tool-macos-arm64
+          cp dist/windows/asr-tool-windows-x86_64.zip dist/release/asr-tool-windows-x86_64.zip
+          cp install.sh dist/release/install.sh
 
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --target "$SHA" --title "$TAG" --notes ""
 
-          gh release upload "$TAG" dist/release/asr-linux-x86_64.zip --clobber
-          gh release upload "$TAG" dist/release/asr-macos-arm64 --clobber
-          gh release upload "$TAG" dist/release/asr-windows-x86_64.zip --clobber
+          gh release upload "$TAG" dist/release/asr-tool-linux-x86_64.zip --clobber
+          gh release upload "$TAG" dist/release/asr-tool-macos-arm64 --clobber
+          gh release upload "$TAG" dist/release/asr-tool-windows-x86_64.zip --clobber
+          gh release upload "$TAG" dist/release/install.sh --clobber

@@ -20,6 +20,9 @@ project(asr-tool VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(ASR_TARGET_NAME asr_tool)
+set(ASR_BINARY_NAME asr-tool)
+set(ASR_LEGACY_BINARY_NAME asr)
 
 # 平台检测
 if(APPLE)
@@ -88,7 +91,7 @@ FetchContent_MakeAvailable(whisper)
 # ============================================================
 # 主可执行文件
 # ============================================================
-add_executable(asr
+add_executable(${ASR_TARGET_NAME}
     src/main.cpp
     src/model_manager.cpp
     src/platform.cpp
@@ -97,15 +100,26 @@ add_executable(asr
     src/output.cpp
 )
 
-target_include_directories(asr PUBLIC
+set_target_properties(${ASR_TARGET_NAME} PROPERTIES
+    OUTPUT_NAME "${ASR_BINARY_NAME}"
+)
+
+# Clean up the legacy binary name in reused build directories.
+add_custom_command(TARGET ${ASR_TARGET_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+            "$<TARGET_FILE_DIR:${ASR_TARGET_NAME}>/${ASR_LEGACY_BINARY_NAME}$<TARGET_FILE_SUFFIX:${ASR_TARGET_NAME}>"
+    VERBATIM
+)
+
+target_include_directories(${ASR_TARGET_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(asr PUBLIC whisper)
+target_link_libraries(${ASR_TARGET_NAME} PUBLIC whisper)
 
 # Keep runtime search path local on Linux so bundled .so files are discovered.
 if(UNIX AND NOT APPLE)
-    set_target_properties(asr PROPERTIES
+    set_target_properties(${ASR_TARGET_NAME} PROPERTIES
         BUILD_RPATH "\$ORIGIN"
         INSTALL_RPATH "\$ORIGIN"
     )
@@ -113,7 +127,7 @@ endif()
 
 # macOS 系统框架
 if(APPLE)
-    target_link_libraries(asr PUBLIC
+    target_link_libraries(${ASR_TARGET_NAME} PUBLIC
         "-framework CoreML"
         "-framework Metal"
         "-framework MetalKit"
@@ -122,10 +136,10 @@ if(APPLE)
 endif()
 
 # 编译器警告
-target_compile_options(asr PRIVATE
+target_compile_options(${ASR_TARGET_NAME} PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
 # 安装目标
-install(TARGETS asr RUNTIME DESTINATION bin)
+install(TARGETS ${ASR_TARGET_NAME} RUNTIME DESTINATION bin)

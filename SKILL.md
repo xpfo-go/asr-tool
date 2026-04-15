@@ -16,20 +16,10 @@ metadata:
 
 ## 命令行接口
 
-请使用 Skill 二进制绝对路径（不要直接调用 `asr`，避免与 macOS 系统 `/usr/sbin/asr` 冲突）：
+安装完成并确保 `asr-tool` 已在 `PATH` 中后，可直接调用：
 
 ```bash
-<ASR_BIN> <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
-```
-
-```bash
-# macOS / Linux
-ASR_BIN="$HOME/.claude/skills/asr-tool/bin/asr"   # 或 ~/.codex/skills/asr-tool/bin/asr 或 ~/.agents/skills/asr-tool/bin/asr
-```
-
-```powershell
-# Windows（注意 .exe）
-$ASR_BIN="$env:USERPROFILE\.claude\skills\asr-tool\bin\asr.exe"   # 或 $env:USERPROFILE\.codex\skills\asr-tool\bin\asr.exe 或 $env:USERPROFILE\.agents\skills\asr-tool\bin\asr.exe
+asr-tool <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
 ```
 
 ### 参数说明
@@ -50,22 +40,22 @@ $ASR_BIN="$env:USERPROFILE\.claude\skills\asr-tool\bin\asr.exe"   # 或 $env:USE
 
 ```bash
 # 最简用法
-<ASR_BIN> recording.mp3
+asr-tool recording.mp3
 
 # 查看版本
-<ASR_BIN> --version
+asr-tool --version
 
 # 指定输出文件
-<ASR_BIN> meeting.m4a -o transcript.txt
+asr-tool meeting.m4a -o transcript.txt
 
 # 指定语言与 prompt
-<ASR_BIN> doctor_recording.mp3 -l zh -p "药物名称、检查项目"
+asr-tool doctor_recording.mp3 -l zh -p "药物名称、检查项目"
 
 # 指定模型目录
-<ASR_BIN> audio.mp3 -m /data/models/whisper
+asr-tool audio.mp3 -m /data/models/whisper
 
 # 输出为 SRT 字幕格式
-<ASR_BIN> video.mov -f srt -o subtitles.srt
+asr-tool video.mov -f srt -o subtitles.srt
 ```
 
 ## 输出格式
