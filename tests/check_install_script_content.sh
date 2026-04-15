@@ -108,6 +108,57 @@ rg -F 'Detected skill roots (default: all)' "$prompt_output_file" >/dev/null
 rg -F 'Use Up/Down to move, Space to toggle, a to toggle all, Enter to confirm.' "$prompt_output_file" >/dev/null
 rm -f "$prompt_input_file" "$prompt_output_file"
 
+pty_capture_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-pty-capture.XXXXXX")"
+SCRIPT_PATH="$script_path" TEST_HOME="$temp_home" PTY_CAPTURE_FILE="$pty_capture_file" python3 <<'PY'
+import os
+import pty
+import select
+import sys
+import time
+
+script_path = os.environ["SCRIPT_PATH"]
+test_home = os.environ["TEST_HOME"]
+capture_file = os.environ["PTY_CAPTURE_FILE"]
+pid, master_fd = pty.fork()
+if pid == 0:
+    os.environ["HOME"] = test_home
+    os.execvpe(
+        "bash",
+        ["bash", "-lc", f'set -euo pipefail; source "{script_path}"; prompt_for_targets >/dev/null'],
+        os.environ,
+    )
+
+output = bytearray()
+sent = False
+deadline = time.time() + 10
+while time.time() < deadline:
+    rlist, _, _ = select.select([master_fd], [], [], 0.2)
+    if master_fd in rlist:
+        chunk = os.read(master_fd, 4096)
+        if not chunk:
+            break
+        output.extend(chunk)
+        if (not sent) and b"Use Up/Down to move" in output:
+            os.write(master_fd, b"\x1b[B\r")
+            sent = True
+    pid_done, _ = os.waitpid(pid, os.WNOHANG)
+    if pid_done == pid and not rlist:
+        break
+
+with open(capture_file, "wb") as fh:
+    fh.write(output)
+PY
+python3 - "$pty_capture_file" <<'PY'
+import pathlib
+import sys
+
+capture = pathlib.Path(sys.argv[1]).read_bytes()
+if b"^[[B" in capture:
+    sys.stderr.write("pty menu unexpectedly echoed raw down-arrow sequences\n")
+    sys.exit(1)
+PY
+rm -f "$pty_capture_file"
+
 assert_eq "$temp_home/.zshrc" "$(choose_shell_rc_file /bin/zsh)"
 assert_eq "$temp_home/.bashrc" "$(choose_shell_rc_file /bin/bash)"
 ensure_line_in_file "$temp_home/.zshrc" "$PATH_EXPORT_LINE"

@@ -274,7 +274,7 @@ prompt_for_targets() {
   local selection prompt_in prompt_out current_index key key_2 key_3
   local selected_indexes status_message menu_lines
   local label root_dir marker cursor_prefix
-  local index
+  local index prompt_tty_state
 
   while IFS= read -r selection; do
     detected+=("$selection")
@@ -299,8 +299,12 @@ prompt_for_targets() {
   selected_indexes="$(all_selected_indexes "${#detected[@]}")"
   menu_lines=$((${#detected[@]} + 2))
 
+  prompt_tty_state="$(stty -g < "$prompt_in" 2>/dev/null || true)"
   exec 3< "$prompt_in"
   exec 4> "$prompt_out"
+  if [[ -n "$prompt_tty_state" ]]; then
+    stty -echo -icanon -echoctl min 1 time 0 < "$prompt_in"
+  fi
 
   while true; do
     printf '\r' >&4
@@ -366,6 +370,9 @@ prompt_for_targets() {
     printf '\033[%dA' "$menu_lines" >&4
   done
 
+  if [[ -n "$prompt_tty_state" ]]; then
+    stty "$prompt_tty_state" < "$prompt_in" 2>/dev/null || true
+  fi
   printf '\n' >&4
   exec 3<&-
   exec 4>&-
