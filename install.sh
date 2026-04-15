@@ -597,7 +597,7 @@ ensure_path_configuration() {
 }
 
 main() {
-  local latest_tag target_entry label root_dir
+  local latest_tag prompt_output target_entry label root_dir
   local -a targets
 
   command_exists git || die 'git is required to install or update Skill directories'
@@ -606,9 +606,11 @@ main() {
   latest_tag="$(resolve_latest_release_tag)"
   log "Latest release: $latest_tag"
 
+  prompt_output="$(prompt_for_targets)"
   while IFS= read -r target_entry; do
+    [[ -n "$target_entry" ]] || continue
     targets+=("$target_entry")
-  done < <(prompt_for_targets)
+  done <<< "$prompt_output"
   ensure_path_configuration
   ensure_ffmpeg
 
@@ -628,6 +630,8 @@ main() {
   printf 'Open a new terminal or source your shell rc file if the PATH change is not visible yet.\n'
 }
 
-if [[ "${BASH_SOURCE[0]-}" == "$0" && -z "${ASR_TOOL_INSTALL_SOURCE_ONLY:-}" ]]; then
-  main "$@"
+if [[ -z "${ASR_TOOL_INSTALL_SOURCE_ONLY:-}" ]]; then
+  if ! (return 0 2>/dev/null); then
+    main "$@"
+  fi
 fi

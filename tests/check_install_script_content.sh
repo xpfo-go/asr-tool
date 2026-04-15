@@ -22,6 +22,32 @@ assert_eq() {
 ASR_TOOL_INSTALL_SOURCE_ONLY=1 source "$script_path"
 ASR_TOOL_INSTALL_SOURCE_ONLY=1 bash < "$script_path" >/dev/null
 
+stdin_home="$(mktemp -d "${TMPDIR:-/tmp}/asr-tool-stdin-home.XXXXXX")"
+stdin_status=0
+stdin_output="$(HOME="$stdin_home" ASR_TOOL_RELEASE_TAG=vtest bash < "$script_path" 2>&1)" || stdin_status=$?
+rm -rf "$stdin_home"
+assert_eq "1" "$stdin_status"
+[[ "$stdin_output" == *'[INFO] Latest release: vtest'* ]] || {
+  echo "stdin execution did not enter main"
+  echo "$stdin_output"
+  exit 1
+}
+[[ "$stdin_output" == *'No supported skill roots detected'* ]] || {
+  echo "stdin execution did not reach skill-root detection"
+  echo "$stdin_output"
+  exit 1
+}
+[[ "$stdin_output" != *'Ensured PATH contains'* ]] || {
+  echo "stdin execution continued after target detection failure"
+  echo "$stdin_output"
+  exit 1
+}
+[[ "$stdin_output" != *'unbound variable'* ]] || {
+  echo "stdin execution hit an unbound variable after target detection failure"
+  echo "$stdin_output"
+  exit 1
+}
+
 assert_eq "asr-tool-macos-arm64" "$(release_asset_name macOS arm64)"
 assert_eq "asr-tool-linux-x86_64.zip" "$(release_asset_name Linux x86_64)"
 assert_eq "asr-tool-windows-x86_64.zip" "$(release_asset_name Windows x86_64)"
