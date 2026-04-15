@@ -38,7 +38,6 @@ Notes:
 - macOS / Linux: run the command above in your terminal
 - Windows: run it in Git Bash; after installation, `asr-tool` is available from Git Bash, PowerShell, and `cmd`
 - If an existing Skill directory has local modifications, the installer exits with an error instead of overwriting your changes
-- The old manual `git clone` + manual binary download flow is no longer the recommended path
 
 ---
 

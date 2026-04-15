@@ -38,7 +38,6 @@ curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.
 - macOS / Linux：直接在终端运行上面的命令
 - Windows：请在 Git Bash 中运行上面的命令；安装完成后 PowerShell 和 `cmd` 里也可以直接执行 `asr-tool`
 - 若某个已存在的 Skill 目录有未提交改动，安装脚本会直接报错，不会覆盖你的本地修改
-- 旧的“手动 `git clone` + 手动下载二进制”方式不再推荐
 
 ---
 
