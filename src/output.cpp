@@ -180,21 +180,36 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
 
 }  // anonymous namespace
 
-void write_output(const TranscriptionResult& result, OutputFormat format,
+bool write_output(const TranscriptionResult& result, OutputFormat format,
                   const std::filesystem::path& output_path) {
     if (output_path.empty()) {
         // 输出到 stdout
         write_to_stream(std::cout, result, format);
-        std::cout.flush();
+        if (!std::cout.flush()) {
+            (void)fprintf(stderr, "[ERROR] 无法写入 stdout\n");
+            return false;
+        }
+        return true;
     } else {
         std::ofstream file(output_path.string());
         if (!file.is_open()) {
             (void)fprintf(stderr, "[ERROR] 无法写入输出文件: %s\n",
                            output_path.string().c_str());
-            return;
+            return false;
         }
         write_to_stream(file, result, format);
+        if (!file.good()) {
+            (void)fprintf(stderr, "[ERROR] 写入输出文件失败: %s\n",
+                           output_path.string().c_str());
+            return false;
+        }
         file.close();
+        if (!file.good()) {
+            (void)fprintf(stderr, "[ERROR] 关闭输出文件失败: %s\n",
+                           output_path.string().c_str());
+            return false;
+        }
         (void)printf("[DONE] 输出已保存: %s\n", output_path.string().c_str());
+        return true;
     }
 }

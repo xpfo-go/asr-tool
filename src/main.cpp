@@ -217,7 +217,9 @@ int main(int argc, char* argv[]) {
         return 4;
     }
 
-    write_output(result, format, output_path);
+    if (!write_output(result, format, output_path)) {
+        return 4;
+    }
 
     (void)printf("[INFO] 转写完成: %zu 个片段, 时长 %.1f 秒\n",
                  result.segments.size(), result.duration_seconds);
