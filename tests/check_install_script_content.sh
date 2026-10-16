@@ -111,8 +111,10 @@ rm -f "$prompt_input_file" "$prompt_output_file"
 pty_capture_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-pty-capture.XXXXXX")"
 SCRIPT_PATH="$script_path" TEST_HOME="$temp_home" PTY_CAPTURE_FILE="$pty_capture_file" python3 <<'PY'
 import os
+import errno
 import pty
 import select
+import signal
 import sys
 import time
 
@@ -124,29 +126,47 @@ if pid == 0:
     os.environ["HOME"] = test_home
     os.execvpe(
         "bash",
-        ["bash", "-lc", f'set -euo pipefail; source "{script_path}"; prompt_for_targets >/dev/null'],
+        ["bash", "-c", f'set -euo pipefail; source "{script_path}"; prompt_for_targets >/dev/null'],
         os.environ,
     )
 
 output = bytearray()
 sent = False
-deadline = time.time() + 10
-while time.time() < deadline:
-    rlist, _, _ = select.select([master_fd], [], [], 0.2)
-    if master_fd in rlist:
-        chunk = os.read(master_fd, 4096)
+deadline = time.monotonic() + 10
+eof = False
+try:
+    while time.monotonic() < deadline:
+        rlist, _, _ = select.select([master_fd], [], [], 0.2)
+        if master_fd not in rlist:
+            continue
+        try:
+            chunk = os.read(master_fd, 4096)
+        except OSError as error:
+            # Linux PTY masters report EIO when the slave closes.
+            if error.errno != errno.EIO:
+                raise
+            chunk = b""
         if not chunk:
+            eof = True
             break
         output.extend(chunk)
         if (not sent) and b"Use Up/Down to move" in output:
             os.write(master_fd, b"\x1b[B\r")
             sent = True
-    pid_done, _ = os.waitpid(pid, os.WNOHANG)
-    if pid_done == pid and not rlist:
-        break
+finally:
+    if not eof:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    _, status = os.waitpid(pid, 0)
+    os.close(master_fd)
 
 with open(capture_file, "wb") as fh:
     fh.write(output)
+if not eof or not sent or not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+    sys.stderr.write("pty menu did not display and exit successfully\n")
+    sys.exit(1)
 PY
 python3 - "$pty_capture_file" <<'PY'
 import pathlib
