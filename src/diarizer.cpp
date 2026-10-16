@@ -101,4 +101,7 @@ std::vector<SpeakerTurn> diarize(const std::vector<float>& samples,
 } catch (const std::exception& e) {
     error = "说话人分析失败，请检查本地模型: " + std::string(e.what());
     return {};
+} catch (...) {
+    error = "Speaker analysis failed; check local models";
+    return {};
 }

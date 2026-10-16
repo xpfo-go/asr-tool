@@ -332,6 +332,9 @@ bool write_output(const TranscriptionResult& result, OutputFormat format,
     } catch (const std::exception& error) {
         (void)fprintf(stderr, "[ERROR] 无法保存输出: %s\n", error.what());
         return false;
+    } catch (...) {
+        (void)fprintf(stderr, "[ERROR] Could not save output; check directory permissions and free space\n");
+        return false;
     }
 }
 

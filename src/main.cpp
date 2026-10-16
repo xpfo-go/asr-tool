@@ -187,11 +187,17 @@ int run_live(const std::string& output_path, const std::string& language,
     } catch (const std::exception& error) {
         (void)fprintf(stderr, "[ERROR] 实时转写失败: %s\n", error.what());
         failed = true;
+    } catch (...) {
+        (void)fprintf(stderr, "[ERROR] Live transcription failed\n");
+        failed = true;
     }
     try {
         review_queue.finish();
     } catch (const std::exception& error) {
         (void)fprintf(stderr, "[ERROR] 实时复核失败: %s\n", error.what());
+        failed = true;
+    } catch (...) {
+        (void)fprintf(stderr, "[ERROR] Live review failed\n");
         failed = true;
     }
     {
@@ -206,13 +212,16 @@ int run_live(const std::string& output_path, const std::string& language,
     } catch (const std::exception& error) {
         (void)fprintf(stderr, "[ERROR] 实时转写初始化失败: %s\n", error.what());
         return 4;
+    } catch (...) {
+        (void)fprintf(stderr, "[ERROR] Live transcription initialization failed\n");
+        return 4;
     }
 #endif
 }
 
 }  // namespace
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     std::string output_path;
     std::string language = "auto";
     std::string prompt;
@@ -452,4 +461,10 @@ int main(int argc, char* argv[]) {
     // 使用 _Exit 避免 ggml-metal 退出时的断言问题
     (void)fflush(nullptr);
     _Exit(0);
+} catch (const std::exception& error) {
+    (void)fprintf(stderr, "[ERROR] %s\n", error.what());
+    return 4;
+} catch (...) {
+    (void)fprintf(stderr, "[ERROR] Operation failed; check input paths, permissions, and local models\n");
+    return 4;
 }

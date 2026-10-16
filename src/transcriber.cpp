@@ -199,6 +199,9 @@ TranscriptionResult Transcriber::transcribe(const std::filesystem::path& audio_p
     } catch (const std::exception& e) {
         error_message_ = e.what();
         return {};
+    } catch (...) {
+        error_message_ = "Transcription failed; check audio, models, and temporary-directory permissions";
+        return {};
     }
 }
 
