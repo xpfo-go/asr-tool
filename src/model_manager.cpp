@@ -1,6 +1,8 @@
 #include "model_manager.hpp"
+#include "temporary_directory.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -8,8 +10,16 @@
 #include <optional>
 #include <string>
 #include <vector>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <spawn.h>
 #include <sys/wait.h>
+extern char** environ;
 #endif
 
 namespace {
@@ -17,6 +27,7 @@ namespace {
 constexpr const char* MODEL_NAME = "ggml-large-v3-turbo-q8_0.bin";
 constexpr const char* MODEL_PREFIX = "ggml-large-v3";
 constexpr std::uintmax_t MIN_MODEL_FILE_SIZE = 64ULL * 1024ULL * 1024ULL;  // 64MB
+constexpr std::uintmax_t DEFAULT_MODEL_FILE_SIZE = 874188075;
 
 std::string get_model_url() {
     return "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" +
@@ -50,105 +61,66 @@ std::filesystem::path get_model_cache_dir(
     return p;
 }
 
-std::string shell_quote(const std::string& s) {
+int run_command(const std::vector<std::filesystem::path>& arguments, bool quiet = false) {
 #if defined(_WIN32)
-    std::string out = "\"";
-    for (char c : s) {
-        if (c == '"') {
-            out += "\"\"";
-        } else {
-            out.push_back(c);
+    std::wstring command;
+    for (const auto& argument : arguments) {
+        if (!command.empty()) command += L' ';
+        command += L'"';
+        size_t backslashes = 0;
+        for (wchar_t character : argument.native()) {
+            if (character == L'\\') { ++backslashes; continue; }
+            command.append(backslashes * (character == L'"' ? 2 : 1), L'\\');
+            if (character == L'"') command += L'\\';
+            command += character;
+            backslashes = 0;
         }
+        command.append(backslashes * 2, L'\\');
+        command += L'"';
     }
-    out += "\"";
-    return out;
-#else
-    std::string out = "'";
-    for (char c : s) {
-        if (c == '\'') {
-            out += "'\"'\"'";
-        } else {
-            out.push_back(c);
-        }
+    STARTUPINFOW startup = {sizeof(startup)};
+    PROCESS_INFORMATION process = {};
+    SECURITY_ATTRIBUTES security = {sizeof(security), nullptr, TRUE};
+    HANDLE null_file = INVALID_HANDLE_VALUE;
+    if (quiet) {
+        null_file = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, nullptr);
+        if (null_file == INVALID_HANDLE_VALUE) return -1;
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = startup.hStdOutput = startup.hStdError = null_file;
     }
-    out += "'";
-    return out;
-#endif
-}
-
-bool run_command_quiet(const std::string& cmd) {
-#if defined(_WIN32)
-    const std::string full_cmd = cmd + " >NUL 2>&1";
+    const BOOL created = CreateProcessW(nullptr, command.data(), nullptr, nullptr,
+        quiet ? TRUE : FALSE, 0, nullptr, nullptr, &startup, &process);
+    if (null_file != INVALID_HANDLE_VALUE) CloseHandle(null_file);
+    if (!created) return -1;
+    const DWORD waited = WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1;
+    const BOOL have_code = GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    return waited == WAIT_OBJECT_0 && have_code ? static_cast<int>(code) : -1;
 #else
-    const std::string full_cmd = cmd + " >/dev/null 2>&1";
-#endif
-    return std::system(full_cmd.c_str()) == 0;
-}
-
-struct CommandResult {
-    int exit_code = -1;
-    std::string output;
-};
-
-int decode_exit_status(int raw_status) {
-#if defined(_WIN32)
-    return raw_status;
-#else
-    if (raw_status == -1) {
+    std::vector<char*> argv;
+    for (const auto& argument : arguments)
+        argv.push_back(const_cast<char*>(argument.c_str()));
+    argv.push_back(nullptr);
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) return -1;
+    if (quiet && (posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0) != 0 ||
+                  posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0) != 0)) {
+        posix_spawn_file_actions_destroy(&actions);
         return -1;
     }
-    if (WIFEXITED(raw_status)) {
-        return WEXITSTATUS(raw_status);
-    }
-    if (WIFSIGNALED(raw_status)) {
-        return 128 + WTERMSIG(raw_status);
-    }
-    return raw_status;
+    pid_t pid;
+    const int spawned = posix_spawnp(&pid, argv.front(), &actions, nullptr, argv.data(), environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawned != 0) return -1;
+    int status = 0;
+    pid_t waited;
+    do { waited = waitpid(pid, &status, 0); } while (waited == -1 && errno == EINTR);
+    if (waited == -1) return -1;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #endif
-}
-
-CommandResult run_command_capture(const std::string& cmd) {
-    CommandResult result;
-    const std::string full_cmd = cmd + " 2>&1";
-#if defined(_WIN32)
-    FILE* pipe = _popen(full_cmd.c_str(), "r");
-#else
-    FILE* pipe = popen(full_cmd.c_str(), "r");
-#endif
-    if (!pipe) {
-        result.exit_code = -1;
-        return result;
-    }
-
-    char buf[512] = {0};
-    for (;;) {
-        const std::size_t n = std::fread(buf, 1, sizeof(buf), pipe);
-        if (n > 0) {
-            result.output.append(buf, n);
-            (void)std::fwrite(buf, 1, n, stderr);
-            (void)std::fflush(stderr);
-        }
-        if (n < sizeof(buf)) {
-            break;
-        }
-    }
-
-#if defined(_WIN32)
-    const int raw_status = _pclose(pipe);
-#else
-    const int raw_status = pclose(pipe);
-#endif
-    result.exit_code = decode_exit_status(raw_status);
-    return result;
-}
-
-bool has_command(const char* cmd) {
-#if defined(_WIN32)
-    const std::string check = "where " + std::string(cmd);
-#else
-    const std::string check = "command -v " + std::string(cmd);
-#endif
-    return run_command_quiet(check);
 }
 
 bool starts_with(const std::string& s, const std::string& prefix) {
@@ -178,6 +150,11 @@ bool file_size_matches(const std::filesystem::path& path, std::uintmax_t expecte
            std::filesystem::file_size(path, ec) == expected_size && !ec;
 }
 
+bool main_model_size_ok(const std::filesystem::path& path) {
+    return path.filename() == MODEL_NAME ? file_size_matches(path, DEFAULT_MODEL_FILE_SIZE)
+                                        : file_size_ok(path, MIN_MODEL_FILE_SIZE);
+}
+
 std::optional<std::filesystem::path> find_cached_large_v3_model(
     const std::filesystem::path& cache_dir) {
     std::error_code ec;
@@ -195,11 +172,11 @@ std::optional<std::filesystem::path> find_cached_large_v3_model(
             continue;
         }
 
-        const std::string filename = entry.path().filename().string();
+        const std::string filename = entry.path().filename().u8string();
         if (!starts_with(filename, MODEL_PREFIX) || !ends_with(filename, ".bin")) {
             continue;
         }
-        if (!file_size_ok(entry.path(), MIN_MODEL_FILE_SIZE)) {
+        if (!main_model_size_ok(entry.path())) {
             continue;
         }
         candidates.push_back(entry.path());
@@ -222,66 +199,41 @@ bool replace_file(const std::filesystem::path& src,
                   const std::filesystem::path& dst) {
     std::error_code ec;
 #if defined(_WIN32)
-    // Windows 上 rename 到已存在目标通常会失败，先尝试删除旧文件。
-    std::filesystem::remove(dst, ec);
-    ec.clear();
-#endif
+    return MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
     std::filesystem::rename(src, dst, ec);
-    if (!ec) {
-        return true;
-    }
-
-    ec.clear();
-    std::filesystem::copy_file(src, dst,
-                               std::filesystem::copy_options::overwrite_existing,
-                               ec);
-    if (ec) {
-        return false;
-    }
-
-    ec.clear();
-    std::filesystem::remove(src, ec);
-    return true;
+    return !ec;
+#endif
 }
 
 bool try_download_main_model(const std::filesystem::path& model_path) {
-    if (!has_command("curl")) {
-        (void)fprintf(stderr, "[WARN] 未找到 curl，无法自动下载模型\n");
-        return false;
-    }
-
     std::error_code ec;
     std::filesystem::create_directories(model_path.parent_path(), ec);
     if (ec) {
         (void)fprintf(stderr, "[WARN] 创建模型目录失败: %s\n",
-                      model_path.parent_path().string().c_str());
+                      model_path.parent_path().u8string().c_str());
         return false;
     }
 
-    const std::filesystem::path part_path =
-        model_path.parent_path() / (model_path.filename().string() + ".part");
-    std::filesystem::remove(part_path, ec);
-    (void)ec;
-
-    const std::string cmd =
-        "curl -fL --show-error --progress-bar --retry 3 --retry-delay 1 "
-        "--connect-timeout 20 -o " +
-        shell_quote(part_path.string()) + " " + shell_quote(get_model_url());
+    TemporaryDirectory staging(model_path.parent_path());
+    const auto part_path = staging.path() / MODEL_NAME;
     (void)fprintf(stderr, "[INFO] 下载中（主模型）...\n");
-    CommandResult curl_result = run_command_capture(cmd);
-    if (curl_result.exit_code != 0) {
+    const int code = run_command({"curl", "-fL", "--show-error", "--progress-bar",
+        "--retry", "3", "--retry-delay", "1", "--connect-timeout", "20",
+        "-o", part_path, get_model_url()});
+    if (code != 0) {
         (void)fprintf(stderr,
                       "[WARN] 自动下载命令执行失败 (exit=%d)\n",
-                      curl_result.exit_code);
+                      code);
         (void)fprintf(stderr, "[WARN] 详细错误见上方实时输出\n");
         std::filesystem::remove(part_path, ec);
         (void)ec;
         return false;
     }
 
-    if (!file_size_ok(part_path, MIN_MODEL_FILE_SIZE)) {
+    if (!file_size_matches(part_path, DEFAULT_MODEL_FILE_SIZE)) {
         (void)fprintf(stderr, "[WARN] 下载的模型文件异常（大小不足）: %s\n",
-                      part_path.string().c_str());
+                      part_path.u8string().c_str());
         std::filesystem::remove(part_path, ec);
         (void)ec;
         return false;
@@ -289,13 +241,13 @@ bool try_download_main_model(const std::filesystem::path& model_path) {
 
     if (!replace_file(part_path, model_path)) {
         (void)fprintf(stderr, "[WARN] 模型文件落盘失败: %s\n",
-                      model_path.string().c_str());
+                      model_path.u8string().c_str());
         std::filesystem::remove(part_path, ec);
         (void)ec;
         return false;
     }
 
-    return file_size_ok(model_path, MIN_MODEL_FILE_SIZE);
+    return file_size_matches(model_path, DEFAULT_MODEL_FILE_SIZE);
 }
 
 #if defined(__APPLE__)
@@ -340,10 +292,6 @@ std::optional<std::string> derive_model_name(
 
 bool try_download_coreml_encoder(const std::string& model_name,
                                  const std::filesystem::path& coreml_path) {
-    if (!has_command("curl") || !has_command("unzip")) {
-        return false;
-    }
-
     const std::filesystem::path target_dir = coreml_path.parent_path();
     std::error_code ec;
     std::filesystem::create_directories(target_dir, ec);
@@ -351,34 +299,40 @@ bool try_download_coreml_encoder(const std::string& model_name,
         return false;
     }
 
-    const std::filesystem::path zip_path =
-        target_dir / ("ggml-" + model_name + "-encoder.mlmodelc.zip");
+    TemporaryDirectory staging(target_dir);
+    const auto zip_path = staging.path() / "encoder.zip";
     const std::string url =
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-" +
         model_name + "-encoder.mlmodelc.zip";
 
-    const std::string dl_cmd =
-        "curl -fL --show-error --progress-bar --retry 3 --retry-delay 1 "
-        "--connect-timeout 20 -o " +
-        shell_quote(zip_path.string()) + " " + shell_quote(url);
     (void)fprintf(stderr, "[INFO] 下载中（CoreML 编码器）...\n");
-    CommandResult dl_result = run_command_capture(dl_cmd);
-    if (dl_result.exit_code != 0) {
+    const int code = run_command({"curl", "-fL", "--show-error", "--progress-bar",
+        "--retry", "3", "--retry-delay", "1", "--connect-timeout", "20", "-o", zip_path, url});
+    if (code != 0) {
         (void)fprintf(stderr,
                       "[WARN] CoreML 编码器下载失败 (exit=%d)\n",
-                      dl_result.exit_code);
+                      code);
         (void)fprintf(stderr, "[WARN] 详细错误见上方实时输出\n");
         std::filesystem::remove(zip_path, ec);
         return false;
     }
 
-    const std::string unzip_cmd =
-        "unzip -o " + shell_quote(zip_path.string()) + " -d " +
-        shell_quote(target_dir.string());
-    const bool unzip_ok = run_command_quiet(unzip_cmd);
-    std::filesystem::remove(zip_path, ec);
-    (void)ec;
-    return unzip_ok && std::filesystem::exists(coreml_path);
+    if (run_command({"unzip", "-o", zip_path, "-d", staging.path()}, true) != 0) return false;
+    const auto extracted = staging.path() / coreml_path.filename();
+    for (const auto* name : {"coremldata.bin", "model.mil", "weights/weight.bin"})
+        if (!file_size_ok(extracted / name, 1)) return false;
+
+    const auto previous = staging.path() / "previous";
+    const bool had_previous = std::filesystem::exists(coreml_path, ec);
+    if (ec) return false;
+    if (had_previous) {
+        std::filesystem::rename(coreml_path, previous, ec);
+        if (ec) return false;
+    }
+    std::filesystem::rename(extracted, coreml_path, ec);
+    if (!ec) return true;
+    if (had_previous) std::filesystem::rename(previous, coreml_path, ec);
+    return false;
 }
 #endif
 
@@ -388,7 +342,7 @@ std::filesystem::path get_default_model_path(
     const std::filesystem::path& model_dir) {
     const std::filesystem::path cache_dir = get_model_cache_dir(model_dir);
     const std::filesystem::path preferred = cache_dir / MODEL_NAME;
-    if (file_size_ok(preferred, MIN_MODEL_FILE_SIZE)) {
+    if (main_model_size_ok(preferred)) {
         return preferred;
     }
 
@@ -401,21 +355,21 @@ std::filesystem::path get_default_model_path(
 }
 
 bool ensure_main_model(const std::filesystem::path& model_path, bool allow_download) {
-    if (file_size_ok(model_path, MIN_MODEL_FILE_SIZE)) {
+    if (main_model_size_ok(model_path)) {
         return true;
     }
     if (!allow_download) {
         (void)fprintf(stderr, "[ERROR] 本地主模型缺失: %s\n请先运行 asr-tool --prepare-models\n",
-                      model_path.string().c_str());
+                      model_path.u8string().c_str());
         return false;
     }
 
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "[WARN] 模型文件不存在或不完整: %s\n",
-                  model_path.string().c_str());
+                  model_path.u8string().c_str());
     (void)fprintf(stderr, "[INFO] 尝试自动下载模型（约 800MB）...\n");
     if (try_download_main_model(model_path)) {
-        (void)printf("[INFO] 模型下载成功: %s\n", model_path.string().c_str());
+        (void)printf("[INFO] 模型下载成功: %s\n", model_path.u8string().c_str());
         return true;
     }
     (void)fprintf(stderr,
@@ -423,20 +377,20 @@ bool ensure_main_model(const std::filesystem::path& model_path, bool allow_downl
 
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr,
-                  "[ERROR] 模型文件不存在: %s\n", model_path.string().c_str());
+                  "[ERROR] 模型文件不存在: %s\n", model_path.u8string().c_str());
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "首次运行需要下载模型（约 800MB）\n");
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "手动下载命令:\n");
 #if defined(_WIN32)
     (void)fprintf(stderr, "  mkdir \"%s\"\n",
-                  model_path.parent_path().string().c_str());
+                  model_path.parent_path().u8string().c_str());
 #else
     (void)fprintf(stderr, "  mkdir -p \"%s\"\n",
-                  model_path.parent_path().string().c_str());
+                  model_path.parent_path().u8string().c_str());
 #endif
     (void)fprintf(stderr, "  curl -fSL -o \"%s\" \"%s\"\n",
-                  model_path.string().c_str(), get_model_url().c_str());
+                  model_path.u8string().c_str(), get_model_url().c_str());
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "或使用 -m/--model-dir 指定模型目录\n");
     (void)fprintf(stderr, "\n");
@@ -447,7 +401,9 @@ bool ensure_main_model(const std::filesystem::path& model_path, bool allow_downl
 bool ensure_coreml_encoder_model(const std::filesystem::path& model_path, bool allow_download) {
     const std::filesystem::path coreml_path =
         derive_coreml_encoder_path(model_path);
-    if (std::filesystem::exists(coreml_path)) {
+    if (file_size_ok(coreml_path / "coremldata.bin", 1) &&
+        file_size_ok(coreml_path / "model.mil", 1) &&
+        file_size_ok(coreml_path / "weights/weight.bin", 1)) {
         (void)fprintf(stderr, "[INFO] 检测到 CoreML 编码器: %s\n",
                       coreml_path.string().c_str());
         return true;
@@ -488,7 +444,7 @@ bool prepare_meeting_models(const std::filesystem::path& model_dir) {
     std::error_code ec;
     std::filesystem::create_directories(model_dir, ec);
     if (ec) {
-        (void)fprintf(stderr, "[ERROR] 无法创建本地模型目录: %s\n", model_dir.string().c_str());
+        (void)fprintf(stderr, "[ERROR] 无法创建本地模型目录: %s\n", model_dir.u8string().c_str());
         return false;
     }
     const auto download = [&](const std::string& name, const std::string& url,
@@ -497,12 +453,12 @@ bool prepare_meeting_models(const std::filesystem::path& model_dir) {
         if (file_size_matches(target, expected_size)) {
             return true;
         }
-        const auto partial = model_dir / (name + ".part");
+        TemporaryDirectory staging(model_dir);
+        const auto partial = staging.path() / name;
         (void)fprintf(stderr, "[INFO] 准备本地模型: %s\n", name.c_str());
-        const auto result = run_command_capture(
-            "curl -fL --show-error --retry 3 --connect-timeout 20 --max-time 600 -o " +
-            shell_quote(partial.string()) + " " + shell_quote(url));
-        if (result.exit_code != 0 || !file_size_matches(partial, expected_size) || !replace_file(partial, target)) {
+        const int code = run_command({"curl", "-fL", "--show-error", "--retry", "3",
+            "--connect-timeout", "20", "--max-time", "600", "-o", partial, url});
+        if (code != 0 || !file_size_matches(partial, expected_size) || !replace_file(partial, target)) {
             std::filesystem::remove(partial, ec);
             (void)fprintf(stderr, "[ERROR] 模型下载失败或不完整: %s\n", name.c_str());
             return false;
@@ -525,21 +481,16 @@ bool prepare_meeting_models(const std::filesystem::path& model_dir) {
                   "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", 6958444)) {
         return false;
     }
-    if (!run_command_quiet("tar -xjf " + shell_quote((model_dir / "segmentation.tar.bz2").string()) +
-                           " -C " + shell_quote(model_dir.string()))) {
+    TemporaryDirectory staging(model_dir);
+    if (run_command({"tar", "-xjf", model_dir / "segmentation.tar.bz2", "-C", staging.path()}, true) != 0) {
         (void)fprintf(stderr, "[ERROR] 无法解压说话人分段模型，需要 tar\n");
         return false;
     }
-    const auto extracted = model_dir / "sherpa-onnx-pyannote-segmentation-3-0";
-    std::filesystem::copy_file(extracted / "model.onnx", model_dir / "segmentation.onnx",
-                               std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) {
-        return false;
-    }
-    std::filesystem::copy_file(extracted / "LICENSE", model_dir / "segmentation-LICENSE",
-                               std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) return false;
-    return file_size_matches(model_dir / "segmentation.onnx", 5992913);
+    const auto extracted = staging.path() / "sherpa-onnx-pyannote-segmentation-3-0";
+    return file_size_matches(extracted / "model.onnx", 5992913) &&
+        file_size_ok(extracted / "LICENSE", 1) &&
+        replace_file(extracted / "LICENSE", model_dir / "segmentation-LICENSE") &&
+        replace_file(extracted / "model.onnx", model_dir / "segmentation.onnx");
 }
 
 bool prepare_streaming_model(const std::filesystem::path& model_dir) {
@@ -547,7 +498,7 @@ bool prepare_streaming_model(const std::filesystem::path& model_dir) {
     std::error_code ec;
     std::filesystem::create_directories(target_dir, ec);
     if (ec) {
-        (void)fprintf(stderr, "[ERROR] 无法创建流式模型目录: %s\n", target_dir.string().c_str());
+        (void)fprintf(stderr, "[ERROR] 无法创建流式模型目录: %s\n", target_dir.u8string().c_str());
         return false;
     }
     const std::string base =
@@ -556,11 +507,11 @@ bool prepare_streaming_model(const std::filesystem::path& model_dir) {
     const auto download = [&](const char* name, std::uintmax_t size) {
         const auto target = target_dir / name;
         if (file_size_matches(target, size)) return true;
-        const auto partial = target_dir / (std::string(name) + ".part");
-        const auto result = run_command_capture(
-            "curl -fL --show-error --retry 3 --connect-timeout 20 --max-time 900 -o " +
-            shell_quote(partial.string()) + " " + shell_quote(base + name));
-        if (result.exit_code != 0 || !file_size_matches(partial, size) || !replace_file(partial, target)) {
+        TemporaryDirectory staging(target_dir);
+        const auto partial = staging.path() / name;
+        const int code = run_command({"curl", "-fL", "--show-error", "--retry", "3",
+            "--connect-timeout", "20", "--max-time", "900", "-o", partial, base + name});
+        if (code != 0 || !file_size_matches(partial, size) || !replace_file(partial, target)) {
             std::filesystem::remove(partial, ec);
             (void)fprintf(stderr, "[ERROR] 流式模型下载失败或不完整: %s\n", name);
             return false;

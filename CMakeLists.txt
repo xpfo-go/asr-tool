@@ -210,6 +210,21 @@ install(FILES docs/THIRD_PARTY_NOTICES.txt DESTINATION bin)
 include(CTest)
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
+    foreach(tool IN ITEMS curl unzip)
+        add_executable(fake_${tool} tests/fake_model_tool.cpp)
+        set_target_properties(fake_${tool} PROPERTIES OUTPUT_NAME ${tool}
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/model-test-tools")
+        target_compile_options(fake_${tool} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+    endforeach()
+    add_executable(model_manager_test tests/model_manager_test.cpp src/model_manager.cpp)
+    target_include_directories(model_manager_test PRIVATE include)
+    target_link_libraries(model_manager_test PRIVATE Threads::Threads)
+    target_compile_options(model_manager_test PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /utf-8>)
+    add_dependencies(model_manager_test fake_curl fake_unzip)
+    add_test(NAME model_manager COMMAND model_manager_test "$<TARGET_FILE_DIR:fake_curl>")
+    set_tests_properties(model_manager PROPERTIES TIMEOUT 30)
     add_executable(fake_ffmpeg tests/fake_ffmpeg.cpp)
     set_target_properties(fake_ffmpeg PROPERTIES OUTPUT_NAME ffmpeg
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/audio-test-tools")

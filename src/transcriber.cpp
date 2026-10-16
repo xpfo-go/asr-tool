@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <thread>
 
@@ -211,6 +212,10 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
     }
     const auto model_dir = impl_->model_path.parent_path();
     error_message_.clear();
+    if (samples.size() > static_cast<size_t>((std::numeric_limits<int>::max)())) {
+        error_message_ = "Audio exceeds the VAD sample limit; split the recording before transcription";
+        return result;
+    }
     auto speech_params = whisper_vad_default_params();
     speech_params.threshold = impl_->decoding_settings.vad_threshold;
     speech_params.min_speech_duration_ms = 200;
@@ -276,7 +281,7 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
             const auto retry = decode(impl_->ctx, samples.data() + begin, static_cast<int>(end - begin),
                                       decoded.success ? decoded.language : impl_->language, prompt,
                                       settings, settings.retry_beam_size);
-            const bool safe = correction_is_conservative(decoded.text, retry.text);
+            const bool safe = !decoded.success || correction_is_conservative(decoded.text, retry.text);
             if (retry.success && (!decoded.success ||
                 (safe && !retry.repetitive && retry.repetition <= decoded.repetition &&
                  retry.confidence > decoded.confidence + settings.correction_confidence_gain))) {
