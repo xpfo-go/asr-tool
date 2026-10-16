@@ -187,9 +187,17 @@ void test_acoustic_timing() {
     for (const auto& times : std::vector<std::vector<double>>{
              {-1, 600}, {600, 100}, {100, NAN}, {100, 1000}, {100}}) {
         check(!align_token_timestamps(tokens, times, 900, 1000) &&
-              tokens.size() == 2 && tokens[0].text == "你" && tokens[0].start_ms == 100,
-              "invalid acoustic timing must leave the fallback tokens intact");
+              tokens.size() == 2 && tokens[0].text == "你" && tokens[0].start_ms == 100 &&
+              tokens[0].approximate_timing && tokens[1].approximate_timing,
+              "invalid acoustic timing must preserve text and mark its estimates uncertain");
     }
+    check(!repair_token_timestamps(tokens, 1000), "monotonic fallback estimates need no interpolation");
+    TranscriptionResult fallback;
+    append_decoded_window(fallback, tokens, {{0, 1000}, {0, 1000}},
+        {{0, 600, 0, .4}, {600, 1000, 1, .4}}, .8, {});
+    check(fallback.full_text == "你好。" && fallback.segments.size() == 1 &&
+          fallback.segments[0].speaker == -1 && fallback.segments[0].needs_review,
+          "failed DTW with valid old timestamps must not invent a speaker change");
 }
 
 void test_approximate_speakers() {

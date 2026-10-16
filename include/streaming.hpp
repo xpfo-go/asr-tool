@@ -6,6 +6,8 @@
 #include <memory>
 
 // Single producer: accepts mono 16 kHz PCM. No capture or network operations.
+// Callbacks cannot reenter push/finish. Processing failures are terminal and are
+// rethrown on subsequent calls; closing a failed stream never feeds it again.
 class StreamingTranscriber {
 public:
     StreamingTranscriber(const std::filesystem::path& model_directory,

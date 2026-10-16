@@ -104,8 +104,8 @@ done < <(
 )
 assert_eq "1" "${#interactive_targets[@]}"
 assert_eq "OpenClaw|$temp_home/.openclaw/skills" "${interactive_targets[0]}"
-rg -F 'Detected skill roots (default: all)' "$prompt_output_file" >/dev/null
-rg -F 'Use Up/Down to move, Space to toggle, a to toggle all, Enter to confirm.' "$prompt_output_file" >/dev/null
+grep -F 'Detected skill roots (default: all)' "$prompt_output_file" >/dev/null
+grep -F 'Use Up/Down to move, Space to toggle, a to toggle all, Enter to confirm.' "$prompt_output_file" >/dev/null
 rm -f "$prompt_input_file" "$prompt_output_file"
 
 pty_capture_file="$(mktemp "${TMPDIR:-/tmp}/asr-tool-pty-capture.XXXXXX")"
@@ -225,9 +225,9 @@ assert_eq '--prepare-models' "$(cat "$temp_home/model-arguments")"
 assert_eq "$temp_home/.zshrc" "$(choose_shell_rc_file /bin/zsh)"
 assert_eq "$temp_home/.bashrc" "$(choose_shell_rc_file /bin/bash)"
 ensure_line_in_file "$temp_home/.zshrc" "$PATH_EXPORT_LINE"
-rg -F 'export PATH="$HOME/.local/bin:$PATH"' "$temp_home/.zshrc" >/dev/null
+grep -F 'export PATH="$HOME/.local/bin:$PATH"' "$temp_home/.zshrc" >/dev/null
 
-rg -n 'install\.sh' "$repo_root/.github/workflows/release-from-artifacts.yml" >/dev/null
-rg -n 'fetch-depth:[[:space:]]*0' "$repo_root/.github/workflows/ci-build-all.yml" >/dev/null
-rg -n 'curl -fsSL .*install\.sh \| bash' "$repo_root/README.md" >/dev/null
-rg -n 'curl -fsSL .*install\.sh \| bash' "$repo_root/docs/README_en.md" >/dev/null
+grep -En 'install\.sh' "$repo_root/.github/workflows/release-from-artifacts.yml" >/dev/null
+grep -En 'fetch-depth:[[:space:]]*0' "$repo_root/.github/workflows/ci-build-all.yml" >/dev/null
+grep -En 'curl -fsSL .*install\.sh \| bash' "$repo_root/README.md" >/dev/null
+grep -En 'curl -fsSL .*install\.sh \| bash' "$repo_root/docs/README_en.md" >/dev/null

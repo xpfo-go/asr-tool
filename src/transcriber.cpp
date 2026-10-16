@@ -115,7 +115,8 @@ DecodeResult decode(whisper_context* ctx, const float* samples, int count,
             logprob += std::log(std::max(1e-8, static_cast<double>(data.p)));
         }
         const double duration = count / SAMPLE_RATE * 1000.0;
-        align_token_timestamps(segment_tokens, acoustic_times, end, duration);
+        if (settings.acoustic_timestamps)
+            align_token_timestamps(segment_tokens, acoustic_times, end, duration);
         result.tokens.insert(result.tokens.end(), segment_tokens.begin(), segment_tokens.end());
     }
     repair_token_timestamps(result.tokens, count / SAMPLE_RATE * 1000.0);
@@ -132,6 +133,8 @@ DecodeResult decode(whisper_context* ctx, const float* samples, int count,
 
 struct Transcriber::Impl {
     whisper_context* ctx = nullptr;
+    using Vad = std::unique_ptr<whisper_vad_context, decltype(&whisper_vad_free)>;
+    Vad vad{nullptr, whisper_vad_free};
     std::string language;
     std::string prompt;
     std::filesystem::path model_path;
@@ -161,6 +164,15 @@ Transcriber::Transcriber(const std::string& model_path, const std::string& langu
 #endif
     impl_->decoding_settings.backend = backend == Backend::CPU ? "cpu" :
                                       backend == Backend::CUDA ? "cuda" : "coreml+metal";
+    auto vad_params = whisper_vad_default_context_params();
+    vad_params.use_gpu = false;
+    vad_params.n_threads = 2;
+    const auto vad_path = impl_->model_path.parent_path() / "ggml-silero-v6.2.0.bin";
+    impl_->vad.reset(whisper_vad_init_from_file_with_params(vad_path.string().c_str(), vad_params));
+    if (!impl_->vad) {
+        error_message_ = "本地 VAD 模型缺失或损坏，请运行 asr-tool --prepare-models";
+        return;
+    }
     auto params = whisper_context_default_params();
     params.use_gpu = backend != Backend::CPU;
     if (speakers) {
@@ -198,24 +210,14 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
         return result;
     }
     const auto model_dir = impl_->model_path.parent_path();
-    auto vad_params = whisper_vad_default_context_params();
-    vad_params.use_gpu = false;
-    vad_params.n_threads = 2;
-    using Vad = std::unique_ptr<whisper_vad_context, decltype(&whisper_vad_free)>;
-    Vad vad(whisper_vad_init_from_file_with_params(
-                (model_dir / "ggml-silero-v6.2.0.bin").string().c_str(), vad_params),
-            whisper_vad_free);
-    if (!vad) {
-        error_message_ = "本地 VAD 模型缺失或损坏，请运行 asr-tool --prepare-models";
-        return result;
-    }
+    error_message_.clear();
     auto speech_params = whisper_vad_default_params();
     speech_params.threshold = impl_->decoding_settings.vad_threshold;
     speech_params.min_speech_duration_ms = 200;
     speech_params.min_silence_duration_ms = 300;
     speech_params.speech_pad_ms = 200;
     using Speech = std::unique_ptr<whisper_vad_segments, decltype(&whisper_vad_free_segments)>;
-    Speech speech(whisper_vad_segments_from_samples(vad.get(), speech_params, samples.data(),
+    Speech speech(whisper_vad_segments_from_samples(impl_->vad.get(), speech_params, samples.data(),
                                                    static_cast<int>(samples.size())),
                   whisper_vad_free_segments);
     if (!speech) {

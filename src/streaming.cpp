@@ -37,6 +37,8 @@ struct StreamingTranscriber::Impl {
     uint32_t revision = 0;
     int64_t start = 0;
     bool finished = false;
+    bool active = false;
+    std::exception_ptr failure;
 
     Impl(LiveReviewQueue& queue, LiveReviewQueue::Sink output)
         : review(queue), sink(std::move(output)) {}
@@ -127,8 +129,12 @@ StreamingTranscriber::StreamingTranscriber(const std::filesystem::path& model_di
 StreamingTranscriber::~StreamingTranscriber() = default;
 
 void StreamingTranscriber::push(const float* samples, size_t count) {
+    if (impl_->failure) std::rethrow_exception(impl_->failure);
+    if (impl_->active) throw std::logic_error("Streaming callbacks must not reenter the transcriber");
     if (impl_->finished) throw std::logic_error("Streaming audio is already closed");
     if (!samples && count) throw std::invalid_argument("Missing streaming PCM");
+    impl_->active = true;
+    try {
     constexpr size_t chunk = 2560;
     constexpr size_t maximum = 20 * LIVE_SAMPLE_RATE;
     for (size_t offset = 0; offset < count;) {
@@ -145,10 +151,26 @@ void StreamingTranscriber::push(const float* samples, size_t count) {
         }
         offset += size;
     }
+    impl_->active = false;
+    } catch (...) {
+        impl_->active = false;
+        impl_->failure = std::current_exception();
+        throw;
+    }
 }
 
 void StreamingTranscriber::finish() {
+    if (impl_->failure) std::rethrow_exception(impl_->failure);
+    if (impl_->active) throw std::logic_error("Streaming callbacks must not reenter the transcriber");
     if (impl_->finished) return;
-    impl_->complete();
-    impl_->finished = true;
+    impl_->active = true;
+    try {
+        impl_->complete();
+        impl_->finished = true;
+        impl_->active = false;
+    } catch (...) {
+        impl_->active = false;
+        impl_->failure = std::current_exception();
+        throw;
+    }
 }

@@ -226,7 +226,10 @@ bool align_token_timestamps(std::vector<TimedText>& tokens,
         !std::all_of(acoustic_times.begin(), acoustic_times.end(),
                      [duration_ms](double time) { return std::isfinite(time) &&
                          time >= 0.0 && time < duration_ms; }) ||
-        !std::is_sorted(acoustic_times.begin(), acoustic_times.end())) return false;
+        !std::is_sorted(acoustic_times.begin(), acoustic_times.end())) {
+        for (auto& token : tokens) token.approximate_timing = true;
+        return false;
+    }
     std::vector<TimedText> aligned;
     // Tokens sharing one acoustic frame (including split UTF-8) stay together.
     for (size_t a = 0; a < tokens.size();) {
