@@ -3,7 +3,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
+#include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 #ifdef _WIN32
 #include <random>
