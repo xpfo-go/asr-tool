@@ -172,6 +172,12 @@ bool file_size_ok(const std::filesystem::path& path, std::uintmax_t min_size) {
     return size >= min_size;
 }
 
+bool file_size_matches(const std::filesystem::path& path, std::uintmax_t expected_size) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec) &&
+           std::filesystem::file_size(path, ec) == expected_size && !ec;
+}
+
 std::optional<std::filesystem::path> find_cached_large_v3_model(
     const std::filesystem::path& cache_dir) {
     std::error_code ec;
@@ -394,9 +400,14 @@ std::filesystem::path get_default_model_path(
     return preferred;
 }
 
-bool ensure_main_model(const std::filesystem::path& model_path) {
+bool ensure_main_model(const std::filesystem::path& model_path, bool allow_download) {
     if (file_size_ok(model_path, MIN_MODEL_FILE_SIZE)) {
         return true;
+    }
+    if (!allow_download) {
+        (void)fprintf(stderr, "[ERROR] 本地主模型缺失: %s\n请先运行 asr-tool --prepare-models\n",
+                      model_path.string().c_str());
+        return false;
     }
 
     (void)fprintf(stderr, "\n");
@@ -428,22 +439,21 @@ bool ensure_main_model(const std::filesystem::path& model_path) {
                   model_path.string().c_str(), get_model_url().c_str());
     (void)fprintf(stderr, "\n");
     (void)fprintf(stderr, "或使用 -m/--model-dir 指定模型目录\n");
-#if defined(__APPLE__)
-    (void)fprintf(stderr,
-                  "提示: 程序会尝试自动下载预构建 CoreML 编码器，失败时会回退到非 CoreML 路径\n");
-#endif
     (void)fprintf(stderr, "\n");
     return false;
 }
 
 #if defined(__APPLE__)
-bool ensure_coreml_encoder_model(const std::filesystem::path& model_path) {
+bool ensure_coreml_encoder_model(const std::filesystem::path& model_path, bool allow_download) {
     const std::filesystem::path coreml_path =
         derive_coreml_encoder_path(model_path);
     if (std::filesystem::exists(coreml_path)) {
         (void)fprintf(stderr, "[INFO] 检测到 CoreML 编码器: %s\n",
                       coreml_path.string().c_str());
         return true;
+    }
+    if (!allow_download) {
+        return false;
     }
 
     const char* disable = std::getenv("ASR_DISABLE_COREML_AUTO_DOWNLOAD");
@@ -473,3 +483,92 @@ bool ensure_coreml_encoder_model(const std::filesystem::path& model_path) {
     return false;
 }
 #endif
+
+bool prepare_meeting_models(const std::filesystem::path& model_dir) {
+    std::error_code ec;
+    std::filesystem::create_directories(model_dir, ec);
+    if (ec) {
+        (void)fprintf(stderr, "[ERROR] 无法创建本地模型目录: %s\n", model_dir.string().c_str());
+        return false;
+    }
+    const auto download = [&](const std::string& name, const std::string& url,
+                              std::uintmax_t expected_size) {
+        const auto target = model_dir / name;
+        if (file_size_matches(target, expected_size)) {
+            return true;
+        }
+        const auto partial = model_dir / (name + ".part");
+        (void)fprintf(stderr, "[INFO] 准备本地模型: %s\n", name.c_str());
+        const auto result = run_command_capture(
+            "curl -fL --show-error --retry 3 --connect-timeout 20 --max-time 600 -o " +
+            shell_quote(partial.string()) + " " + shell_quote(url));
+        if (result.exit_code != 0 || !file_size_matches(partial, expected_size) || !replace_file(partial, target)) {
+            std::filesystem::remove(partial, ec);
+            (void)fprintf(stderr, "[ERROR] 模型下载失败或不完整: %s\n", name.c_str());
+            return false;
+        }
+        return true;
+    };
+    if (!download("ggml-silero-v6.2.0.bin",
+                  "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+                  885098) ||
+        !download(SPEAKER_MODEL_FILENAME,
+                  "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+                  "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx", 39593761)) {
+        return false;
+    }
+    if (file_size_matches(model_dir / "segmentation.onnx", 5992913)) {
+        return true;
+    }
+    if (!download("segmentation.tar.bz2",
+                  "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/"
+                  "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", 6958444)) {
+        return false;
+    }
+    if (!run_command_quiet("tar -xjf " + shell_quote((model_dir / "segmentation.tar.bz2").string()) +
+                           " -C " + shell_quote(model_dir.string()))) {
+        (void)fprintf(stderr, "[ERROR] 无法解压说话人分段模型，需要 tar\n");
+        return false;
+    }
+    const auto extracted = model_dir / "sherpa-onnx-pyannote-segmentation-3-0";
+    std::filesystem::copy_file(extracted / "model.onnx", model_dir / "segmentation.onnx",
+                               std::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) {
+        return false;
+    }
+    std::filesystem::copy_file(extracted / "LICENSE", model_dir / "segmentation-LICENSE",
+                               std::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) return false;
+    return file_size_matches(model_dir / "segmentation.onnx", 5992913);
+}
+
+bool prepare_streaming_model(const std::filesystem::path& model_dir) {
+    const auto target_dir = model_dir / STREAMING_MODEL_DIRECTORY;
+    std::error_code ec;
+    std::filesystem::create_directories(target_dir, ec);
+    if (ec) {
+        (void)fprintf(stderr, "[ERROR] 无法创建流式模型目录: %s\n", target_dir.string().c_str());
+        return false;
+    }
+    const std::string base =
+        "https://huggingface.co/csukuangfj/sherpa-onnx-" + std::string(STREAMING_MODEL_DIRECTORY) +
+        "/resolve/98590b7ed6443e77b714204da2757d75e1a642f4/";
+    const auto download = [&](const char* name, std::uintmax_t size) {
+        const auto target = target_dir / name;
+        if (file_size_matches(target, size)) return true;
+        const auto partial = target_dir / (std::string(name) + ".part");
+        const auto result = run_command_capture(
+            "curl -fL --show-error --retry 3 --connect-timeout 20 --max-time 900 -o " +
+            shell_quote(partial.string()) + " " + shell_quote(base + name));
+        if (result.exit_code != 0 || !file_size_matches(partial, size) || !replace_file(partial, target)) {
+            std::filesystem::remove(partial, ec);
+            (void)fprintf(stderr, "[ERROR] 流式模型下载失败或不完整: %s\n", name);
+            return false;
+        }
+        return true;
+    };
+    return download("encoder-epoch-99-avg-1.int8.onnx", 181895032) &&
+           download("decoder-epoch-99-avg-1.onnx", 13876452) &&
+           download("joiner-epoch-99-avg-1.int8.onnx", 3228404) &&
+           download("tokens.txt", 56317) && download("bpe.vocab", 12564);
+}

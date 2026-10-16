@@ -1,19 +1,20 @@
 ---
 name: asr-tool
-description: 使用本地 asr-tool 命令将音频或视频文件转写为文本、JSON、SRT 或 VTT。适用于会议录音、播客、采访、字幕生成，以及用户要求本地/离线语音转文字的场景。
+description: 使用本地 asr-tool 转写音视频、区分会议说话人，或进行本机实时听写。适用于会议录音、采访、播客、字幕及离线语音转文字。
 metadata:
   origin: user
 ---
 
 # asr-tool
 
-本 Skill 用本地 `asr-tool` 二进制转写音频/视频文件。默认输出普通文本；用户要求字幕时用 `srt` 或 `vtt`；用户要求结构化结果时用 `json`。
+用本地 `asr-tool` 转写，不上传录音。默认输出文本；会议需要检查说话人、时间戳或纠错记录时用 `json`，字幕用 `srt`/`vtt`。
 
 ## 使用流程
 
-1. 确认用户提供了本地音频/视频路径。
-2. 若用户未指定输出路径，使用工具默认输出：`<输入文件名>.txt`。
+1. 文件转写使用用户提供的本地音频/视频路径；用户明确要求麦克风实时听写时使用 `--live`。
+2. 默认结果位于输入文件旁：`<输入文件名>.txt`。指定 `-o` 为 `.json`、`.srt` 或 `.vtt` 时自动选择格式；显式 `-f` 优先。
 3. 若用户指定语言、术语、领域词或字幕格式，映射到对应参数。
+   术语直接传给 `-p`，保持简短；中英文混合录音保留默认 `auto`，不翻译。
 4. 执行 `asr-tool`，完成后告诉用户输出文件路径。
 5. 除非用户明确要求，不要把长转写全文直接贴进回复。
 
@@ -21,6 +22,7 @@ metadata:
 
 ```bash
 asr-tool <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模型目录>] [-f <格式>] [-v]
+asr-tool --live [-o <JSONL>] [-p <prompt>] [-m <模型目录>]
 ```
 
 ## 参数
@@ -33,28 +35,38 @@ asr-tool <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-m <模
 | `-m, --model-dir <目录>` | 指定包含 `ggml-large-v3*.bin` 的模型目录 |
 | `-f, --format <格式>` | `text`、`json`、`srt`、`vtt` |
 | `-v, --verbose` | 输出详细日志 |
+| `--no-speakers` | 跳过说话人分析，仅转写 |
+| `--prepare-models` | 显式下载本地 ASR、VAD、说话人和实时流式模型；正常转写不联网 |
+| `--live` | 使用 macOS 默认麦克风本地实时转写，输出 JSONL provisional/revision/final 事件 |
 
 ## 示例
 
 ```bash
 asr-tool recording.mp3
 asr-tool meeting.m4a -o transcript.txt
+asr-tool meeting.mp4 -p "MAP、rolling hours、cycle" -o meeting.json
 asr-tool doctor_recording.mp3 -l zh -p "药物名称、检查项目"
 asr-tool video.mov -f srt -o subtitles.srt
 ```
 
 ## 输出选择
 
-- 默认用 `text`
+- 默认用 `text`；会议需要说话人或复核信息时用 `json`
+- 普通会议文本带时间位置与 `[需复核]` 标记，可定位原录音；近似时间、文字和说话人风险的具体原因见 JSON。
 - 用户要字幕：用 `srt` 或 `vtt`
 - 用户要程序处理、时间戳或结构化数据：用 `json`
+- 说话人编号只在当前文件内有效，不代表真实姓名，也可能拆分或合并真人。JSON 的 `speaker: null` 表示不确定，`overlap` 表示重叠发言；`needs_review` 的原因见 `review_reasons`。时间对齐失效且全句说话人不一致时保留整句未知，不按插值分配观点。`timing_approximate` 不等于文字错误，token 分数不等于正确率。
+- 自动纠错仅通过本地音频重解码；`corrections` 保留变更。不要另用文本模型改写转写内容冒充识别结果。
+- `--live` 只使用本机麦克风和本地流式/复核模型；按 `Ctrl-C` 结束。实时模型由 `--prepare-models` 一并准备，用户无需编辑配置文件。
+- v2.0.0-rc 是预发布版，公开准确率未达商业门槛。不要把说话人标签或通顺文字当作经过核实的事实。
 
 ## 故障处理
 
 - `asr-tool` 不存在：检查 `~/.local/bin` 是否在 `PATH`；若当前 Skill 目录有 `install.sh`，可运行安装脚本。
 - `FFmpeg 未安装`：提示用户安装 `ffmpeg`。
-- 模型缺失：将 `ggml-large-v3*.bin` 放入模型目录，或等待工具自动下载默认模型。
-- 长音频会先转换为临时 WAV，再按 30 秒分块转写；磁盘空间不足时需清理临时目录或更换临时目录。
+- 模型缺失：运行 `asr-tool --prepare-models`（需联网），或复制已准备好的模型目录并传入 `-m`。不要在离线转写中自动运行下载命令。
+- 缺少说话人模型时仍可转写，但需向用户说明结果没有说话人标签。
+- 长音频的 PCM 内存和临时 WAV 各约每小时 220MiB，此外还需要推理内存；磁盘空间不足时检查临时目录。
 
 ## 退出码
 

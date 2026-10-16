@@ -10,10 +10,12 @@ public:
     explicit Transcriber(const std::string& model_path,
                          const std::string& language,
                          const std::string& prompt,
-                         Backend backend);
+                         Backend backend,
+                         bool speakers = true);
     ~Transcriber();
 
     TranscriptionResult transcribe(const std::filesystem::path& audio_path);
+    TranscriptionResult transcribe_samples(const std::vector<float>& samples);
 
     bool is_ready() const { return ready_; }
     std::string error_message() const { return error_message_; }

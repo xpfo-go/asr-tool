@@ -1,5 +1,6 @@
 #include "output.hpp"
 
+#include "live.hpp"
 #include "types.hpp"
 
 #include <cstdio>
@@ -60,6 +61,32 @@ std::string trim_copy(const std::string& s) {
     return s.substr(begin, end - begin);
 }
 
+void write_json_string(std::ostream& os, const std::string& text) {
+    os << '"';
+    for (unsigned char c : text) {
+        if (c == '"' || c == '\\') {
+            os << '\\' << c;
+        } else if (c < 0x20) {
+            const char* hex = "0123456789abcdef";
+            os << "\\u00" << hex[c >> 4] << hex[c & 15];
+        } else {
+            os << c;
+        }
+    }
+    os << '"';
+}
+
+std::string speaker_label(const Segment& segment, bool available) {
+    if (!available) {
+        return "";
+    }
+    if (segment.overlap) {
+        return "[重叠发言] ";
+    }
+    return segment.speaker < 0 ? "[说话人不确定] " :
+           "[说话人 " + std::to_string(segment.speaker + 1) + "] ";
+}
+
 void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                     OutputFormat format) {
     switch (format) {
@@ -70,6 +97,11 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                     if (line.empty()) {
                         continue;
                     }
+                    if (result.speakers_available || seg.needs_review) {
+                        os << '[' << ms_to_vtt_time(seg.start_ms) << "] ";
+                    }
+                    os << speaker_label(seg, result.speakers_available);
+                    if (seg.needs_review) os << "[需复核] ";
                     os << line << "\n";
                 }
             } else {
@@ -84,61 +116,36 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
 
         case OutputFormat::Json: {
             os << "{\n";
-            os << "  \"text\": \"";
-            // JSON 转义
-            for (char c : result.full_text) {
-                if (c == '"') {
-                    os << "\\\"";
-                } else if (c == '\\') {
-                    os << "\\\\";
-                } else if (c == '\n') {
-                    os << "\\n";
-                } else if (c == '\r') {
-                    os << "\\r";
-                } else if (c == '\t') {
-                    os << "\\t";
-                } else if (static_cast<unsigned char>(c) < 0x20) {
-                    // ASCII 控制字符转义为 \u00xx
-                    os << "\\u00"
-                       << std::hex << std::setfill('0') << std::setw(2)
-                       << static_cast<int>(static_cast<unsigned char>(c))
-                       << std::dec;
-                } else {
-                    os << c;
-                }
-            }
-            os << "\",\n";
+            os << "  \"text\": ";
+            write_json_string(os, result.full_text);
+            os << ",\n";
 
             os << "  \"segments\": [\n";
             for (size_t i = 0; i < result.segments.size(); ++i) {
                 const auto& seg = result.segments[i];
                 os << "    {\n";
                 os << "      \"start\": " << std::fixed
-                   << std::setprecision(2) << seg.start_ms / 1000.0 << ",\n";
+                   << std::setprecision(3) << seg.start_ms / 1000.0 << ",\n";
                 os << "      \"end\": " << std::fixed
-                   << std::setprecision(2) << seg.end_ms / 1000.0 << ",\n";
-                os << "      \"text\": \"";
-                for (char c : seg.text) {
-                    if (c == '"') {
-                        os << "\\\"";
-                    } else if (c == '\\') {
-                        os << "\\\\";
-                    } else if (c == '\n') {
-                        os << "\\n";
-                    } else if (c == '\r') {
-                        os << "\\r";
-                    } else if (c == '\t') {
-                        os << "\\t";
-                    } else if (static_cast<unsigned char>(c) < 0x20) {
-                        os << "\\u00"
-                           << std::hex << std::setfill('0') << std::setw(2)
-                           << static_cast<int>(static_cast<unsigned char>(c))
-                           << std::dec;
-                    } else {
-                        os << c;
-                    }
+                   << std::setprecision(3) << seg.end_ms / 1000.0 << ",\n";
+                os << "      \"text\": ";
+                write_json_string(os, seg.text);
+                os << ",\n      \"speaker\": ";
+                if (seg.speaker < 0) {
+                    os << "null";
+                } else {
+                    write_json_string(os, "speaker_" + std::to_string(seg.speaker + 1));
                 }
-                os << "\"\n    }";
+                os << ",\n      \"overlap\": " << (seg.overlap ? "true" : "false");
+                os << ",\n      \"needs_review\": " << (seg.needs_review ? "true" : "false");
+                os << ",\n      \"confidence\": " << std::setprecision(4) << seg.confidence;
+                os << ",\n      \"review_reasons\": [";
+                for (size_t j = 0; j < seg.review_reasons.size(); ++j) {
+                    if (j) os << ", ";
+                    write_json_string(os, seg.review_reasons[j]);
+                }
+                os << "]";
+                os << "\n    }";
                 if (i + 1 < result.segments.size()) {
                     os << ",";
                 }
@@ -146,8 +153,57 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
             }
             os << "  ],\n";
 
-            os << "  \"language\": \"" << result.language << "\",\n";
-            os << "  \"model\": \"" << result.model_name << "\",\n";
+            os << "  \"language\": ";
+            write_json_string(os, result.language);
+            os << ",\n  \"model\": ";
+            write_json_string(os, result.model_name);
+            const auto& settings = result.decoding_settings;
+            os << ",\n  \"decoding_settings\": {\"strategy\": \"greedy_with_selective_beam_retry\","
+               << " \"threads\": " << settings.threads
+               << ", \"retry_beam_size\": " << settings.retry_beam_size
+               << ", \"review_threshold\": " << settings.review_threshold
+               << ", \"correction_confidence_gain\": " << settings.correction_confidence_gain
+               << ", \"vad_threshold\": " << settings.vad_threshold
+               << ", \"acoustic_timestamps\": " << (settings.acoustic_timestamps ? "true" : "false")
+               << ", \"history_prompt\": " << (settings.history_prompt ? "true" : "false")
+               << ", \"requested_language\": ";
+            write_json_string(os, settings.requested_language);
+            os << ", \"requested_backend\": ";
+            write_json_string(os, settings.backend);
+            os << "}";
+            os << ",\n  \"speakers_available\": " << (result.speakers_available ? "true" : "false");
+            os << ",\n  \"speaker_model\": ";
+            write_json_string(os, result.speaker_model);
+            os << ",\n  \"speaker_turns\": [";
+            for (size_t i = 0; i < result.speaker_turns.size(); ++i) {
+                const auto& turn = result.speaker_turns[i];
+                if (i) os << ",";
+                os << "\n    {\"start\": " << std::setprecision(3) << turn.start_ms / 1000.0
+                   << ", \"end\": " << turn.end_ms / 1000.0 << ", \"speaker\": ";
+                if (turn.speaker < 0) os << "null";
+                else write_json_string(os, "speaker_" + std::to_string(turn.speaker + 1));
+                os << ", \"confidence\": " << std::setprecision(4) << turn.confidence << "}";
+            }
+            os << "\n  ]";
+            os << ",\n  \"warnings\": [";
+            for (size_t i = 0; i < result.warnings.size(); ++i) {
+                if (i) os << ", ";
+                write_json_string(os, result.warnings[i]);
+            }
+            os << "],\n  \"corrections\": [";
+            for (size_t i = 0; i < result.corrections.size(); ++i) {
+                const auto& change = result.corrections[i];
+                if (i) os << ",";
+                os << "\n    {\"start\": " << std::setprecision(2) << change.start_ms / 1000.0
+                   << ", \"end\": " << change.end_ms / 1000.0 << ", \"original_text\": ";
+                write_json_string(os, change.original_text);
+                os << ", \"corrected_text\": ";
+                write_json_string(os, change.corrected_text);
+                os << ", \"reason\": ";
+                write_json_string(os, change.reason);
+                os << "}";
+            }
+            os << "\n  ],\n";
             os << "  \"duration\": " << std::fixed << std::setprecision(2)
                << result.duration_seconds << "\n";
             os << "}\n";
@@ -160,7 +216,7 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                 os << (i + 1) << "\n";
                 os << ms_to_srt_time(seg.start_ms) << " --> "
                    << ms_to_srt_time(seg.end_ms) << "\n";
-                os << seg.text << "\n\n";
+                os << speaker_label(seg, result.speakers_available) << seg.text << "\n\n";
             }
             break;
         }
@@ -171,7 +227,7 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                 const auto& seg = result.segments[i];
                 os << ms_to_vtt_time(seg.start_ms) << " --> "
                    << ms_to_vtt_time(seg.end_ms) << "\n";
-                os << seg.text << "\n\n";
+                os << speaker_label(seg, result.speakers_available) << seg.text << "\n\n";
             }
             break;
         }
@@ -212,4 +268,31 @@ bool write_output(const TranscriptionResult& result, OutputFormat format,
         (void)printf("[DONE] 输出已保存: %s\n", output_path.string().c_str());
         return true;
     }
+}
+
+void write_live_event(std::ostream& output, const LiveEvent& event) {
+    const char* kind = event.kind == LiveEventKind::Provisional ? "provisional" :
+                       event.kind == LiveEventKind::Revision ? "revision" : "final";
+    output << "{\"type\":\"" << kind << "\",\"utterance_id\":" << event.utterance_id
+           << ",\"revision\":" << event.revision
+           << ",\"start\":" << std::fixed << std::setprecision(3)
+           << event.start_sample / 16000.0 << ",\"end\":"
+           << event.end_sample / 16000.0 << ",\"text\":";
+    write_json_string(output, event.text);
+    output << ",\"reviewed\":" << (event.reviewed ? "true" : "false");
+    if (!event.original_text.empty()) {
+        output << ",\"original_text\":";
+        write_json_string(output, event.original_text);
+    }
+    if (!event.review_text.empty()) {
+        output << ",\"review_text\":";
+        write_json_string(output, event.review_text);
+    }
+    if (!event.reason.empty()) {
+        output << ",\"reason\":";
+        write_json_string(output, event.reason);
+    }
+    if (event.emitted_seconds >= 0) output << ",\"emitted_seconds\":" << std::setprecision(6) << event.emitted_seconds;
+    if (event.received_samples >= 0) output << ",\"received_samples\":" << event.received_samples;
+    output << "}\n";
 }

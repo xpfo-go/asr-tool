@@ -7,6 +7,8 @@ on:
       - main
     paths:
       - CMakeLists.txt
+      - cmake/**
+      - tests/**
       - include/**
       - src/**
       - scripts/**
@@ -19,6 +21,8 @@ on:
   pull_request:
     paths:
       - CMakeLists.txt
+      - cmake/**
+      - tests/**
       - include/**
       - src/**
       - scripts/**
@@ -33,6 +37,22 @@ permissions:
   contents: read
 
 jobs:
+  evaluation-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tests/evaluation/requirements.txt
+      - name: Install evaluation dependencies
+        run: python -m pip install -r tests/evaluation/requirements.txt
+      - name: Test scoring and installation logic
+        run: |
+          python -m unittest discover -s tests/evaluation -p 'test_*.py'
+          bash tests/check_install_script_content.sh
+
   build:
     if: github.actor != 'github-actions[bot]'
     name: Build (${{ matrix.os }})
@@ -86,13 +106,18 @@ jobs:
         shell: pwsh
         run: cmake --build build --config Release --parallel 4
 
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Prepare Output (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p out/linux-x86_64
           cp build/asr-tool out/linux-x86_64/asr-tool
           chmod +x out/linux-x86_64/asr-tool
-          find build -type f \( -name 'libwhisper*.so*' -o -name 'libggml*.so*' \) -exec cp -f {} out/linux-x86_64/ \;
+          find build \( -type f -o -type l \) \( -name 'libwhisper*.so*' -o -name 'libggml*.so*' -o -name 'libsherpa-onnx*.so*' -o -name 'libonnxruntime*.so*' \) -exec cp -fL {} out/linux-x86_64/ \;
+          cp docs/THIRD_PARTY_NOTICES.txt out/linux-x86_64/
+          out/linux-x86_64/asr-tool --version
           (cd out/linux-x86_64 && zip -r ../asr-tool-linux-x86_64.zip .)
 
       - name: Prepare Output (macOS)
@@ -100,7 +125,9 @@ jobs:
         run: |
           mkdir -p out/macos-arm64
           cp build/asr-tool out/macos-arm64/asr-tool
+          cp docs/THIRD_PARTY_NOTICES.txt out/macos-arm64/
           chmod +x out/macos-arm64/asr-tool
+          out/macos-arm64/asr-tool --version
 
       - name: Prepare Output (Windows)
         if: runner.os == 'Windows'
@@ -108,9 +135,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path out/windows-x86_64 | Out-Null
           Copy-Item build/Release/asr-tool.exe out/windows-x86_64/asr-tool.exe -Force
-          Get-ChildItem -Path build -Recurse -File -Include whisper*.dll,ggml*.dll | ForEach-Object {
+          Get-ChildItem -Path build -Recurse -File -Include whisper*.dll,ggml*.dll,sherpa-onnx*.dll,onnxruntime*.dll | ForEach-Object {
             Copy-Item $_.FullName out/windows-x86_64 -Force
           }
+          Copy-Item docs/THIRD_PARTY_NOTICES.txt out/windows-x86_64 -Force
+          & out/windows-x86_64/asr-tool.exe --version
           Compress-Archive -Path out/windows-x86_64/* -DestinationPath out/asr-tool-windows-x86_64.zip -Force
 
       - name: Upload Artifact (Linux)
@@ -126,7 +155,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: asr-tool-macos-arm64
-          path: out/macos-arm64/asr-tool
+          path: out/macos-arm64/
           if-no-files-found: error
 
       - name: Upload Artifact (Windows)

@@ -29,13 +29,11 @@ mkdir -p "${INSTALL_DIR}"
 cmake -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
 cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)"
 
-cp "${BUILD_DIR}/asr" "${INSTALL_DIR}/"
-info "构建完成: ${INSTALL_DIR}/asr"
+cmake --install "${BUILD_DIR}" --prefix "${PROJECT_ROOT}/bin/macos-$(uname -m)"
+info "构建完成: ${INSTALL_DIR}/bin/asr-tool"
 
 # 检查 CoreML 模型
 MODEL_PATH="${HOME}/.cache/whisper/ggml-large-v3-turbo-q8_0.bin"
 if [[ ! -s "${MODEL_PATH}" ]]; then
-    info "模型文件不存在，首次运行时会自动下载"
-    info "或手动下载: curl -fSL -o ${MODEL_PATH} \\"
-    info "  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+    info "模型文件不存在，请运行 ${INSTALL_DIR}/bin/asr-tool --prepare-models"
 fi

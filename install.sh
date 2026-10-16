@@ -6,9 +6,6 @@ REPO_NAME="asr-tool"
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
 LATEST_RELEASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest"
 LATEST_RELEASE_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-MODEL_NAME="ggml-large-v3-turbo-q8_0.bin"
-MODEL_GLOB="ggml-large-v3*.bin"
-MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_NAME}"
 PATH_EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
 
 log() {
@@ -113,10 +110,6 @@ binary_release_marker() {
 
 model_cache_dir() {
   printf '%s\n' "$HOME/.cache/whisper"
-}
-
-model_target_path() {
-  printf '%s\n' "$(model_cache_dir)/${MODEL_NAME}"
 }
 
 choose_shell_rc_file() {
@@ -558,6 +551,8 @@ remove_old_binary_payload() {
   find "$install_dir" -maxdepth 1 -type f \
     \( -name 'asr-tool' -o -name 'asr-tool.exe' -o \
        -name 'libwhisper*.so*' -o -name 'libggml*.so*' -o \
+       -name 'libsherpa-onnx*.so*' -o -name 'libonnxruntime*.so*' -o \
+       -name 'sherpa-onnx*.dll' -o -name 'onnxruntime*.dll' -o \
        -name 'whisper*.dll' -o -name 'ggml*.dll' \) -delete
 }
 
@@ -584,7 +579,8 @@ install_or_update_binary() {
   marker_path="$(binary_release_marker)"
   marker_tag="$(cat "$marker_path" 2>/dev/null || true)"
 
-  if [[ "$marker_tag" == "$1" && -f "$install_dir/$binary_name" ]]; then
+  if [[ "$marker_tag" == "$1" && -f "$install_dir/$binary_name" &&
+        -f "$install_dir/THIRD_PARTY_NOTICES.txt" ]]; then
     if [[ "$os_name" == 'Windows' ]]; then
       write_windows_shim "$install_dir"
     fi
@@ -614,6 +610,8 @@ install_or_update_binary() {
     log "Downloading ${asset_name}"
     download_file "$download_url" "$install_dir/asr-tool"
     chmod +x "$install_dir/asr-tool"
+    download_file "$(release_download_url "$1" 'THIRD_PARTY_NOTICES.txt')" \
+      "$install_dir/THIRD_PARTY_NOTICES.txt"
   fi
 
   printf '%s\n' "$1" > "$marker_path"
@@ -622,24 +620,9 @@ install_or_update_binary() {
   log "Installed shared binary into $install_dir"
 }
 
-find_existing_model() {
-  local model_dir
-  model_dir="$(model_cache_dir)"
-  mkdir -p "$model_dir"
-  find "$model_dir" -maxdepth 1 -type f -name "$MODEL_GLOB" | head -n 1
-}
-
 ensure_model() {
-  local existing_model model_path
-  existing_model="$(find_existing_model || true)"
-  if [[ -n "$existing_model" ]]; then
-    log "Model already available: $existing_model"
-    return
-  fi
-
-  model_path="$(model_target_path)"
-  log "Downloading Whisper model to $model_path"
-  download_file "$MODEL_URL" "$model_path"
+  log 'Preparing local ASR, VAD, speaker, and live models'
+  "$(binary_install_dir)/asr-tool" --prepare-models -m "$(model_cache_dir)"
 }
 
 run_with_privilege() {

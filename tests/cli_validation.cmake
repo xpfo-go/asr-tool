@@ -1,0 +1,22 @@
+file(MAKE_DIRECTORY "${TEST_DIRECTORY}")
+file(WRITE "${TEST_DIRECTORY}/input.wav" "original audio sentinel")
+
+function(expect_exit expected message)
+    execute_process(COMMAND "${ASR_BINARY}" ${ARGN}
+        RESULT_VARIABLE code OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+    if(NOT "${code}" STREQUAL "${expected}" OR NOT "${error}" MATCHES "${message}")
+        message(FATAL_ERROR "Unexpected CLI result (${code}): ${output}\n${error}")
+    endif()
+endfunction()
+
+expect_exit(1 "不支持的语言" --live -l invalid-language)
+expect_exit(1 "输入必须是本地文件" "${TEST_DIRECTORY}")
+expect_exit(1 "不能覆盖原始录音" "${TEST_DIRECTORY}/input.wav" -o "${TEST_DIRECTORY}/input.wav")
+expect_exit(4 "输出目录" "${TEST_DIRECTORY}/input.wav" -o "${TEST_DIRECTORY}/missing/output.json")
+expect_exit(4 "输出目录" "${TEST_DIRECTORY}/input.wav" -o "${TEST_DIRECTORY}")
+expect_exit(1 "不支持的输出格式" "${TEST_DIRECTORY}/input.wav" -f invalid)
+file(READ "${TEST_DIRECTORY}/input.wav" content)
+if(NOT content STREQUAL "original audio sentinel")
+    message(FATAL_ERROR "CLI validation modified the input")
+endif()
+file(REMOVE_RECURSE "${TEST_DIRECTORY}")

@@ -1,7 +1,10 @@
 # Build
 build/
+build-*/
 cmake-build-*/
 *.cmake
+!cmake/*.cmake
+!tests/*.cmake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -33,6 +36,11 @@ compile_commands.json
 
 # Keep project build config tracked
 !CMakeLists.txt
+!docs/THIRD_PARTY_NOTICES.txt
+!tests/evaluation/requirements.txt
+__pycache__/
+.venv*/
+*.jsonl
 
 # Local downloaded binary
 bin/

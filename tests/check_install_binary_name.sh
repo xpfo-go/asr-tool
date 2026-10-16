@@ -54,8 +54,13 @@ if [[ -e "$legacy_bin" ]]; then
   exit 1
 fi
 
+if [[ ! -s "$install_dir/bin/THIRD_PARTY_NOTICES.txt" ]]; then
+  echo "installed binary must include third-party notices"
+  exit 1
+fi
+
 version_output="$($expected_bin --version)"
-expected_version="$(git -C "$source_dir" describe --tags --dirty --always 2>/dev/null | sed 's/^v//')"
+expected_version="$(sed -n 's/^ASR_APP_VERSION:INTERNAL=//p' "$build_dir/CMakeCache.txt")"
 expected_output="asr-tool ${expected_version}"
 
 if [[ "$version_output" != "$expected_output" ]]; then

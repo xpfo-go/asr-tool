@@ -1,279 +1,68 @@
-# asr-tool — 需求文档
-
-## 1. 项目定位
-
-为 Claude Code / Codex 设计的**零配置、命令行极简**的本地语音转文字工具。
-
-- **语言**: C++（C++17）
-- **推理引擎**: whisper.cpp（ggml-large-v3-turbo）
-- **分发方式**: GitHub git clone 后直接运行预编译二进制
-- **配置文件**: 无
-
-## 2. 核心设计原则
-
-| 原则 | 说明 |
-|------|------|
-| 零配置 | 所有行为通过命令行参数控制，无 YAML/JSON 配置文件 |
-| 即装即用 | git clone 后有对应平台的预编译程序，下载模型后可直接运行 |
-| 模型内置 | 使用 `ggml-large-v3-turbo`，首次运行自动下载到 `~/.cache/whisper/` |
-| 多平台兼容 | macOS / Windows / Linux 各有预编译二进制 |
-| 优雅降级 | 加速不可用时自动回退，不需用户干预 |
-| 长音频支持 | 先用 FFmpeg 转为临时 WAV，再按 30 秒分块推理，避免一次性把全部音频加载进 whisper |
-
-## 3. 命令行接口
-
-```
-asr-tool <输入文件> [-o <输出文件>] [-l <语言>] [-p <prompt>] [-f <格式>] [-v]
-```
-
-### 参数
-
-| 参数 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `<输入文件>` | 是 | — | 音频/视频文件路径 |
-| `-o, --output` | 否 | `<输入>.txt` | 输出路径 |
-| `-l, --language` | 否 | `auto` | 语言，如 `zh`/`en`/`ja`/`auto` |
-| `-p, --prompt` | 否 | — | 提示文本，引导模型输出 |
-| `-f, --format` | 否 | `text` | 输出格式：`text`/`json`/`srt`/`vtt` |
-| `-v, --verbose` | 否 | false | 显示详细日志 |
-| `-h, --help` | 否 | — | 帮助 |
-| `--version` | 否 | — | 版本 |
-
-### 示例
-
-```bash
-# 最简用法
-asr-tool recording.mp3
-
-# 指定输出文件
-asr-tool meeting.m4a -o transcript.txt
-
-# 指定语言 + prompt
-asr-tool doctor_recording.mp3 -l zh -p "药物名称、检查项目"
-
-# 输出 SRT 字幕
-asr-tool video.mov -f srt -o subtitles.srt
-
-# 显示详细日志
-asr-tool audio.wav -v
-```
-
-### Prompt 使用技巧
-
-- **有帮助**: `"The speaker is discussing software architecture patterns including microservices and event-driven design"`
-- **有害**: 太长或与音频内容无关的 prompt
-- **适用场景**: 专有名词（产品名、技术术语）、特定口音引导
-
-## 4. 长音频支持
-
-whisper.cpp 本身对音频长度没有硬编码限制，但长音频一次性加载到内存会导致 OOM。本项目当前实现采用“两阶段”处理：先用 FFmpeg 将输入音频/视频转换为 16kHz 单声道 float32 临时 WAV 文件，再从临时 WAV 按固定大小分块送入 whisper。
-
-### 分块处理策略
-
-```
-音频/视频文件 → FFmpeg 转换为临时 WAV
-        → 按 30 秒分块读取 PCM samples
-        → whisper 逐段推理
-        → 结果拼接（segments 汇总 + 时间戳偏移修正）
-```
-
-### 核心设计
-
-- **临时文件转换**: FFmpeg 先生成 16kHz mono float32 WAV 临时文件，便于统一读取各类媒体格式
-- **分块大小**: 每块 30 秒音频（与 whisper 的上下文窗口匹配）
-- **时间戳修正**: 每块结果的时间戳需要累加前序块的时长，拼接时做偏移修正
-- **内存占用**: 推理阶段只保留单块音频和模型上下文，内存不随音频时长线性增长
-- **磁盘占用**: 临时 WAV 会随音频时长增长，超长音频需确保临时目录有足够空间
-- **适用场景**: 支持 1 小时、2 小时甚至更长的音频，实际上限受磁盘空间和处理时间影响
-
-### 实现要点
-
-| 环节 | 说明 |
-|------|------|
-| 音频转换 | 通过 FFmpeg 输出 16kHz mono float32 WAV 临时文件 |
-| 音频读取 | 从临时 WAV 的 data chunk 分块读取 PCM samples |
-| 分块控制 | 按固定采样点数分块（如 480000 samples = 30s @ 16kHz） |
-| 时间戳偏移 | 记录每个 chunk 的起始时间，后续 segments 的 start/end 加上累积偏移 |
-| 结果拼接 | 逐块追加 segments，最终输出完整的带时间戳转写结果 |
-| JSON/SRT/VTT 输出 | 时间戳连续（无重复），反映真实音频位置 |
-
-### 内存占用估算
-
-| 组件 | 内存占用 |
-|------|----------|
-| 模型权重（ggml-large-v3-turbo） | ~1.5GB |
-| 单块音频缓冲（30s @ 16kHz float） | ~3.8MB |
-| 模型推理中间张量 | ~500MB（视加速后端而定） |
-| **总计（峰值）** | **~2-3GB**（推理内存不随音频时长增长） |
-
-## 5. 加速策略
-
-### macOS
-
-```
-CoreML → CPU（回退）
-```
-
-- **CoreML**: 优先尝试。Apple Silicon / Intel Mac 均支持
-- **CPU**: BLAS/Accelerate 框架多线程加速
-- 首次运行自动探测，日志输出当前使用的加速方案
-
-### Windows / Linux
-
-```
-CUDA → CPU（回退）
-```
-
-- **CUDA**: 优先尝试。需 NVIDIA 驱动 + CUDA Toolkit
-- **CPU**: OpenBLAS 多线程加速，无 NVIDIA 时使用
-
-### 日志示例
-
-```
-[INFO] macOS — 尝试 CoreML... 成功
-[INFO] 使用加速: CoreML
-[INFO] 加载模型: ggml-large-v3-turbo
-[INFO] 开始转写: recording.mp3 (00:05:30)
-[DONE] 输出已保存: recording.mp3.txt
-```
-
-```
-[INFO] Linux — 尝试 CUDA... 失败 (未找到 NVIDIA 驱动)
-[INFO] 回退到 CPU 模式
-[INFO] 加载模型: ggml-large-v3-turbo
-...
-```
-
-## 6. 依赖
-
-### 强依赖
-
-| 依赖 | 用途 | 安装方式 |
-|------|------|----------|
-| **FFmpeg** | 音频格式预处理（支持 mp3/m4a/ogg/mp4 等） | macOS: `brew install ffmpeg` / Linux: `apt install ffmpeg` / Windows: `choco install ffmpeg` 或 `winget install ffmpeg` |
-| whisper.cpp | ASR 推理引擎 | 编译时静态链接，无需运行时依赖 |
-
-> **重要**: FFmpeg 是强依赖。程序启动时会检测 FFmpeg 是否可用，若缺失则直接报错退出并给出对应平台的安装提示。
-
-### 模型
-
-- **文件**: `ggml-large-v3-turbo-q8_0.bin`（约 800MB）
-- **下载**: 首次运行自动从 HuggingFace 下载到 `~/.cache/whisper/`
-- **URL**: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin`
-- **缓存**: 下载后缓存在 `~/.cache/whisper/`，后续运行直接使用，无需重复下载
-
-### 平台特定（编译时）
-
-| 平台 | 加速后端 | 编译要求 |
-|------|----------|----------|
-| macOS (Apple Silicon) | CoreML + Metal | Xcode Command Line Tools, CMake |
-| macOS (Intel) | CPU | Xcode Command Line Tools, CMake |
-| Linux + NVIDIA | CUDA + cuDNN | CUDA Toolkit, CMake |
-| Linux (无 NVIDIA) | CPU (OpenBLAS) | CMake |
-| Windows + NVIDIA | CUDA + cuDNN | MSVC, CMake |
-| Windows (无 NVIDIA) | CPU (OpenBLAS) | CMake |
-
-## 7. 输出格式
-
-### text（默认）
-
-```
-这是一段会议录音的转写结果。
-第二行内容在这里。
-```
-
-### json
-
-```json
-{
-  "text": "这是一段会议录音的转写结果。",
-  "segments": [
-    {
-      "start": 0.0,
-      "end": 5.2,
-      "text": "这是一段会议录音的转写结果。"
-    }
-  ],
-  "language": "zh",
-  "model": "ggml-large-v3-turbo",
-  "duration": 5.2
-}
-```
-
-### srt
-
-```
-1
-00:00:00,000 --> 00:00:05,200
-这是一段会议录音的转写结果。
-
-2
-00:00:05,200 --> 00:00:10,500
-第二行内容在这里。
-```
-
-### vtt
-
-```webvtt
-WEBVTT
-
-00:00:00.000 --> 00:00:05.200
-这是一段会议录音的转写结果。
-
-00:00:05.200 --> 00:00:10.500
-第二行内容在这里。
-```
-
-## 8. 错误处理
-
-| 场景 | 表现 | 解决方案 |
-|------|------|----------|
-| FFmpeg 未安装 | `[ERROR] FFmpeg 未安装，请先安装` + 平台安装提示 | 安装对应平台 FFmpeg |
-| 模型下载失败 | `[ERROR] 模型下载失败，请检查网络` + 手动下载提示 | 检查网络或手动下载到 `~/.cache/whisper/` |
-| 文件不存在 | `[ERROR] 文件不存在: xxx` | 检查文件路径 |
-| 文件格式不支持 | `[ERROR] 不支持的格式，请使用音频/视频文件` | 确认是音视频文件 |
-| 加速失败 | 自动回退到 CPU，继续运行 | 无需干预 |
-
-### 退出码
-
-```
-0  — 成功
-1  — 参数错误 / 文件不存在
-2  — FFmpeg 缺失
-3  — 模型下载/加载失败
-4  — 转写过程错误
-```
-
-## 9. 仓库结构
-
-```
-asr-tool/
-├── SKILL.md                    # Skill 定义（给 Claude Code / Codex 用）
-├── README.md                   # 用户使用说明
-├── REQUIREMENTS.md             # 本文档
-├── CMakeLists.txt              # CMake 构建配置
-├── src/
-│   ├── main.cpp                # CLI 入口，参数解析
-│   ├── transcriber.cpp         # 核心转写逻辑
-│   ├── platform.cpp            # 平台检测与加速选择
-│   ├── output.cpp              # 格式化输出（text/json/srt/vtt）
-│   └── audio.cpp               # 音频读取与 FFmpeg 封装
-├── cmake/
-│   └── ...
-├── scripts/
-│   ├── build-macos.sh          # macOS 构建脚本
-│   ├── build-linux.sh          # Linux 构建脚本
-│   └── build-windows.ps1       # Windows 构建脚本
-└── .gitignore
-```
-
-**注意**: 模型文件不提交到仓库，首次运行时自动下载（~800MB）。
-
-## 10. 注意事项
-
-1. **FFmpeg 是强依赖**：SKILL.md 中必须说明未安装时的安装方式。
-2. **模型首次下载**：需要联网，首次运行后即可离线使用。
-3. **资源占用**：ggml-large-v3-turbo 约需 3-4GB RAM；长音频（>1小时）还会生成较大的临时 WAV，建议在 8GB+ RAM 且临时目录空间充足的机器上运行。
-4. **macOS CoreML**：Apple Silicon 推荐使用，性能接近 GPU。Intel Mac 使用 CPU。
-5. **Windows/Linux CUDA**：需要 NVIDIA 显卡和 CUDA 环境，否则自动回退 CPU。
-6. **跨平台二进制**：预编译二进制放在 `bin/` 目录下，按平台/架构组织。
+# asr-tool 需求与实现约束
+
+本工具处理单设备录制的多人会议，面向本地命令行及 Claude Code / Codex Skill。
+优先验证 Apple Silicon；Linux/Windows 保留现有 CUDA/CPU 构建路径。
+
+## 使用与隐私
+
+- 最简调用为 `asr-tool meeting.mp4`，默认输出带匿名说话人标签的文本。
+- 不上传音频、文本或声纹，不调用云端识别或文本改写服务。
+- 模型仅在安装或显式 `--prepare-models` 时下载。正常推理缺少 ASR/VAD 模型就报错；
+  缺少说话人模型则告警并继续转写。
+- 用户术语沿用 `-p/--prompt`，不引入配置文件或独立词表。提示最多使用末尾 160 tokens。
+- macOS 实时模式使用 `asr-tool --live` 和默认麦克风，输出 JSONL；用户只需可选 `-p`，按 `Ctrl-C` 结束。
+- 默认逐窗口检测语言；弱语言证据可沿用仍受当前音频支持的前文语言，不翻译、不锁定整场。
+- 输出支持 `text/json/srt/vtt`，保留 `-o/-m/-v`；`--no-speakers` 可跳过说话人分析。
+- 默认输出在原文件旁；`-o` 扩展名自动选择格式，`-f` 优先。路径错误和覆盖原音频提前拒绝。
+- 普通会议文本显示时间位置与复核标记，精确原因与原文变更仍由 JSON 保存。
+
+完整参数与安装方式见 [README.md](../README.md)。
+
+## 本地处理链路
+
+1. FFmpeg 仅允许本地文件/管道协议，转换为 16kHz 单声道 float32 WAV，读取全录音 PCM。
+2. Silero VAD 检测语音，优先在停顿处划分不超过 26 秒的窗口。窗口不重叠，
+   避免不可靠的词级时间戳在边界造成漏字。保留最多 64 tokens 的已接受文本作为上下文，
+   长停顿或低置信度窗口后清空。
+3. sherpa-onnx 对整场录音分段、提取 ERes2Net 声纹并聚类，自动估计人数；编号按首次出现排列。
+   保留旧 WeSpeaker 缓存的离线兼容，阈值随模型在内部选择。
+   不识别真实姓名，不跨文件保存声纹，不做声源分离。
+4. whisper.cpp 使用本地 large-v3 模型转写，默认 large-v3-turbo q8。低分或明显重复的
+   窗口用 beam search 重解码；候选需提高 token 分数、保留数字和否定词、不增加重复，
+   忽略大小写和常见标点后的字符编辑比例不超过 25%。
+   这些规则只能保守筛选，不能证明语义正确。
+5. 默认按声学时间对齐文字和说话人；对齐失效时保留整句，标记近似时间。
+   只有全句说话人证据一致时才分配标签，否则整句未知，禁止按文字插值推断换人位置。
+   `--no-speakers` 跳过说话人分析和额外声学对齐。
+6. 写出结果。JSON 提供 `speaker`、`overlap`、`needs_review`、`confidence`、
+   `review_reasons`、`speaker_turns`、`speaker_model`、`corrections` 和 `warnings`。
+   时间对齐风险与文字低分分开标记；token 分数不是识别正确率。
+7. 实时模式由 AVAudioEngine 采集并重采样到单声道 16 kHz；采集队列有界，先输出
+   流式 provisional，再用本地 Turbo 模型复核并输出 revision/final。采集或输出失败
+   以失败状态结束；单句复核失败保留原文并在 final 中记录 `review_failed`，继续处理后续语音。
+   队列满时明确记录未复核状态，不能静默丢音频。
+
+## 资源与平台
+
+- Apple Silicon 的 ASR 使用 CoreML + Metal；无 CoreML 编码器时保留 Metal。
+  说话人分析目前使用 CPU，两个推理线程。
+- Linux/Windows 的 ASR 通过动态后端加载 CUDA，不能加载时使用 CPU。
+  本轮没有这些平台的运行验证，不能宣称已验证 NVIDIA 性能。
+- 全录音 PCM 与临时 WAV 各约每小时 220MiB，此外还有模型、中间张量及聚类内存。
+  内存随录音长度增长；临时文件在读取结束或异常时清理。
+- FFmpeg 是运行依赖。模型准备需要 curl/tar，macOS 的可选 CoreML 下载还需要 unzip。
+- `--live` 需要 macOS 麦克风权限；实时流式模型由 `--prepare-models` 准备，正常运行不联网。
+- 模型和测试录音不提交到 Git。依赖和许可见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+## 验收边界
+
+- 禁止网络的系统环境中完成真实录音转写。
+- 9 月 24 日的完整会议与短录音用于集成验证；无人工参考稿时不报告 CER/WER 提升。
+- 公开会议评测固定来源、区间、校验值；未知说话人计为漏判、包含重叠区间，报告 DER/JER。
+  逐字稿只来自人工参考标注；开发评测工具不成为产品运行依赖，见 [EVALUATION.md](EVALUATION.md)。
+- 单元测试覆盖分段所有权、时间戳退化、UTF-8/英文词拼接、重复词保留、
+  不确定/重叠说话人、数字与否定保护、四种输出和写入失败。
+- 远场、短插话、同声发言及中英文术语仍可能错误，保留复核标记和纠错前后文本。
+
+退出码：`0` 成功，`1` 参数/输入错误，`2` FFmpeg 缺失，`3` 模型加载失败，
+`4` 转写或输出失败。

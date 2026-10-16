@@ -23,6 +23,7 @@ public:
 
     // 读取下一块音频，返回空表示结束
     AudioChunk read_chunk();
+    std::vector<float> read_all();
 
     bool is_eof() const { return eof_; }
     // 输入音频总时长（秒）

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include <limits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -56,12 +57,19 @@ int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
     const char* ffmpeg_argv[] = {
         "ffmpeg",
         "-y",
+        "-nostdin",
+        "-protocol_whitelist",
+        "file,pipe",
         "-i",
         input_path.c_str(),
         "-ar",
         arg_ar.c_str(),
         "-ac",
         arg_ac.c_str(),
+#ifdef ASR_EXPERIMENT_AUDIO_FILTER
+        "-af",
+        ASR_EXPERIMENT_AUDIO_FILTER,
+#endif
         "-f",
         "wav",
         "-acodec",
@@ -112,12 +120,19 @@ int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
     const char* ffmpeg_argv[] = {
         "ffmpeg",
         "-y",
+        "-nostdin",
+        "-protocol_whitelist",
+        "file,pipe",
         "-i",
         input_path.c_str(),
         "-ar",
         arg_ar.c_str(),
         "-ac",
         arg_ac.c_str(),
+#ifdef ASR_EXPERIMENT_AUDIO_FILTER
+        "-af",
+        ASR_EXPERIMENT_AUDIO_FILTER,
+#endif
         "-f",
         "wav",
         "-acodec",
@@ -275,6 +290,23 @@ AudioChunk AudioReader::read_chunk() {
     eof_ = impl_->eof;
 
     return chunk;
+}
+
+std::vector<float> AudioReader::read_all() {
+    const size_t count = impl_->data_size / sizeof(float);
+    if (count > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("音频过长，请拆分为小于 37 小时的文件");
+    }
+    std::vector<float> samples;
+    samples.reserve(count);
+    while (!is_eof()) {
+        auto chunk = read_chunk();
+        samples.insert(samples.end(), chunk.samples.begin(), chunk.samples.end());
+    }
+    if (samples.size() != count || std::ferror(impl_->file)) {
+        throw std::runtime_error("读取音频失败或 WAV 数据被截断");
+    }
+    return samples;
 }
 
 // --- FFmpeg 检测 ---

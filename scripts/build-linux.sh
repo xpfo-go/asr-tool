@@ -39,5 +39,5 @@ mkdir -p "${INSTALL_DIR}"
 cmake -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release ${CUDA_FLAG}
 cmake --build "${BUILD_DIR}" -j"$(nproc)"
 
-cp "${BUILD_DIR}/asr" "${INSTALL_DIR}/"
-info "构建完成: ${INSTALL_DIR}/asr"
+cmake --install "${BUILD_DIR}" --prefix "${INSTALL_DIR}"
+info "构建完成: ${INSTALL_DIR}/bin/asr-tool"
