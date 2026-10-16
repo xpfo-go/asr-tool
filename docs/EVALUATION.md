@@ -1,5 +1,10 @@
 # Public Evaluation
 
+The subsequent local meeting follow-up, including bounded speaker review and
+its separate public stage regression, is recorded in
+[ACCURACY-2026-10-16.md](ACCURACY-2026-10-16.md). The release measurements below
+remain unchanged.
+
 This repository keeps developer-only public evaluations for local ASR and
 speaker diarization. Data, models, generated transcripts, and reports stay in
 the ignored `.cache/evaluation/` directory. No private meeting recording is
@@ -1647,3 +1652,22 @@ usable quality on several groups. The RC meeting acceptance above was executed
 and its results are reported above. The numerical targets remain optimization goals. These are
 developer evaluations; users provide only audio and an optional `-p` prompt,
 not a configuration file, scoring options, or a speaker count.
+
+## Literature-guided Review Diagnostics (2026-10-16)
+
+`decoding_reviews` records original/candidate text, uncalibrated model scores,
+selection, and rejection reasons in JSON only. It does not add a manual selection
+step or change the delivered transcript. Paired checks on five public replays and
+the authorized private meeting preserved text, segments, speaker turns, and
+accepted corrections exactly. The private text difference remains 20.94%.
+See [research and bounded keyword-spotting results](RESEARCH-2026-10-16.md).
+
+## Offline Audio Normalization (2026-10-16)
+
+The subsequent offline change levels audio and unions original/normalized VAD
+coverage while retaining original PCM for speakers. Across 11 public development
+cases, R8001 CER improves from 64.20% to 54.24%, three AMI excerpts improve from
+27.75% to 26.14% weighted WER, and all four nonspeech controls emit no text.
+The authorized private comparison improves from 20.94% to 20.44%. Text attribution
+has mixed public outcomes. Full paired metrics, failed variants, resource costs,
+and limitations are in [the accuracy record](ACCURACY-2026-10-16.md#offline-volume-normalization-and-speech-coverage).

@@ -42,6 +42,25 @@ void test_windows() {
     }
     check(plan_speech_windows({}, 1000).empty(), "silence needs no decode");
     check(plan_speech_windows({{0, 500}}, 500).size() == 1, "short speech needs a window");
+    const auto combined = plan_speech_windows({{0, 60000}, {5000, 10000}, {27000, 28000}}, 60000);
+    check(combined.size() == 3 && combined.front().audio.end_ms == 26000,
+          "overlapping VAD passes must not invent a pause inside continuous speech");
+    for (double time = 1; time < 60000; time += 31) {
+        int owners = 0;
+        for (const auto& window : combined) owners += owns_timestamp(window, time, time);
+        check(owners == 1, "merged VAD coverage must neither lose nor duplicate speech");
+    }
+    const auto conversation = plan_speech_windows({{0, 24000}}, 24000,
+        {{0, 9800, 0, .5}, {10200, 24000, 1, .5}});
+    check(conversation.size() == 2 && conversation[0].audio.end_ms == 10000 &&
+          conversation[1].audio.start_ms == 10000,
+          "a supported speaker change should split context without losing audio");
+    const auto overlapping = plan_speech_windows({{0, 24000}}, 24000,
+        {{0, 24000, 2, .5}, {100, 9800, 0, .5}, {10200, 23000, 1, .5}});
+    check(overlapping.size() == 1, "overlapping voices must not define a clean ASR boundary");
+    const auto weak = plan_speech_windows({{0, 24000}}, 24000,
+        {{0, 9800, 0, -.1}, {10200, 24000, 1, .5}});
+    check(weak.size() == 1, "an uncertain label must not split ASR context");
 }
 
 void test_speakers() {
@@ -60,9 +79,24 @@ void test_speakers() {
           "negative silhouette must not claim a speaker");
     check(assign_speaker(0, 1000, {{0, 300, 1, .4}, {0, 300, 1, .4}}).speaker == -1,
           "duplicate turns must not inflate coverage");
+    check(assign_speaker(900, 1600, {{0, 1000, 1, .4}, {1400, 2000, 1, .4}}).speaker == 1,
+          "a token spanning a brief same-speaker pause must retain its speaker");
+    check(assign_speaker(900, 1600, {{0, 1000, 1, .4}, {1400, 2000, 2, .4}}).speaker == -1,
+          "a pause across different speakers must not be bridged");
+    check(assign_speaker(1100, 1300, {{0, 1000, 1, .4}, {1400, 2000, 1, .4}}).speaker == -1,
+          "text entirely inside silence must not acquire a speaker");
+    check(assign_speaker(900, 1600, {{0, 1000, 1, .4}, {1400, 2000, 1, -.1}}).speaker == -1,
+          "uncertain acoustic evidence must not bridge a pause");
+    check(assign_speaker(900, 1600, {{0, 1000, 1, .4}, {1100, 1200, 2, .4},
+                                   {1400, 2000, 1, .4}}).speaker == -1,
+          "a short intervening speaker must not disappear through smoothing");
 }
 
 void test_corrections() {
+    check(correction_rejection_reason("没有 4 小时", "有 4 小时") == "protected_content",
+          "diagnostics must distinguish sensitive changes from score rejection");
+    check(correction_rejection_reason("abc", "xyz") == "edit_limit",
+          "diagnostics must distinguish large edits");
     check(correction_is_conservative("没有 MAP，4 小时", "没有 map，4 小时。"),
           "safe terminology change should be allowed");
     check(!correction_is_conservative("没有 4 小时", "有 4 小时"), "protect negation");
@@ -235,36 +269,98 @@ void test_approximate_speakers() {
           "overlap and ASR uncertainty must remain visible after grouping");
 }
 
+void test_local_selection() {
+    std::vector<ScoredToken> before{{"Compare", .99}, {" the", .99}, {" cicle", .15},
+        {" distance", .4}, {" today", .8}};
+    auto after = before;
+    after[2].text = " cycle";
+    after[2].probability = .8;
+    check(has_weak_token_span(before), "a weak phrase must survive a high surrounding average");
+    check(local_correction_is_supported(before, after), "supported local repair should be selectable");
+    check(!local_correction_is_supported(after, before), "a weaker local candidate must not replace the text");
+    check(!local_correction_is_supported(before, before), "identical words are not a correction");
+    auto deleted = before;
+    deleted.erase(deleted.begin() + 2);
+    check(!local_correction_is_supported(before, deleted), "deleting weak words is not better evidence");
+    auto inserted = before;
+    inserted.insert(inserted.begin() + 2, after[2]);
+    check(!local_correction_is_supported(before, inserted), "new words alone are not a supported repair");
+    before[2].probability = .9;
+    after[2].probability = .99;
+    check(!local_correction_is_supported(before, after), "strong original wording must be preserved");
+    before[2].probability = NAN;
+    check(!local_correction_is_supported(before, after) && !has_weak_token_span(before),
+          "invalid scores must not authorize a replacement");
+}
+
+void test_readable_text(const std::filesystem::path& directory) {
+    TranscriptionResult result;
+    result.speakers_available = true;
+    result.segments = {{"Hello", 0, 500, 0, false, true, .5, {"low_asr_confidence"}},
+                       {"world.", 500, 1000, 0, false, false, .9, {}},
+                       {"Another turn.", 1000, 1500, 1, false, false, .9, {}},
+                       {"Unknown.", 1500, 2000, -1, false, true, .9, {"speaker_uncertain"}},
+                       {"你好", 2000, 2500, 0, false, false, .9, {}},
+                       {"世界。", 2500, 3000, 0, false, false, .9, {}},
+                       {"After a pause.", 6000, 7000, 0, false, false, .9, {}}};
+    const auto path = directory / "readable.txt";
+    check(write_output(result, OutputFormat::Text, path), "write readable transcript");
+    std::ifstream file(path);
+    const std::string content((std::istreambuf_iterator<char>(file)), {});
+    check(content == "[00:00:00.000] [说话人 1] Hello world.\n"
+                     "[00:00:01.000] [说话人 2] Another turn.\n"
+                     "[00:00:01.500] [说话人不确定] Unknown.\n"
+                     "[00:00:02.000] [说话人 1] 你好世界。\n"
+                     "[00:00:06.000] [说话人 1] After a pause.\n",
+          "paragraphs preserve wording, unknown speakers, language spacing, and long pauses");
+    check(result.segments.size() == 7 && result.segments[0].needs_review,
+          "readable rendering must not rewrite diagnostic segments");
+}
+
 void test_output(const std::filesystem::path& directory) {
     TranscriptionResult result;
     result.full_text = "引号\"换行\n制表\t";
     result.segments = {{"Hello", 0, 1234, 0, false, false, .8, {}},
                        {"world", 1234, 2000, -1, true, true, .5, {"overlap"}}};
-    result.speaker_turns = {{0, 2000, 0, .4}};
+    result.speaker_turns = {{0, 2000, 0, -2.0, 1}};
     result.speakers_available = true;
     result.duration_seconds = 2;
     result.decoding_settings.threads = 4;
     result.decoding_settings.requested_language = "auto";
     result.decoding_settings.acoustic_timestamps = true;
+    result.decoding_settings.speaker_aware_windows = true;
+    result.decoding_settings.volume_normalization = true;
+    result.decoding_reviews = {{0, 1000, "same", "different\"\n", .9, .8, false,
+                               {"edit_limit", "insufficient_score_gain"}}};
     for (const auto format : {OutputFormat::Text, OutputFormat::Json, OutputFormat::Srt, OutputFormat::Vtt}) {
         const auto path = directory / (std::to_string(static_cast<int>(format)) + ".out");
         check(write_output(result, format, path), "output should write successfully");
         std::ifstream file(path);
         const std::string content((std::istreambuf_iterator<char>(file)), {});
         if (format == OutputFormat::Json) {
+            check(content.find("\"candidate_text\": \"different\\\"\\u000a\"") != std::string::npos &&
+                  content.find("\"rejection_reasons\": [\"edit_limit\", \"insufficient_score_gain\"]") != std::string::npos,
+                  "JSON must preserve candidate evidence and every rejection reason");
             check(content.find("\\u000a") != std::string::npos && content.find("\\u0009") != std::string::npos,
                   "JSON must escape controls");
             check(content.find("\"speaker_1\"") != std::string::npos, "JSON needs speaker IDs");
             check(content.find("\"speaker_turns\"") != std::string::npos &&
                   content.find("\"review_reasons\": [\"overlap\"]") != std::string::npos,
                   "JSON must expose independent speaker timing and review reasons");
+            check(content.find("\"original_speaker\": \"speaker_2\"") != std::string::npos &&
+                  content.find("\"attribution_method\": \"local_embedding_review\"") != std::string::npos,
+                  "acoustic speaker corrections must preserve their original label");
             check(content.find("\"decoding_settings\"") != std::string::npos &&
                   content.find("\"threads\": 4") != std::string::npos &&
                   content.find("\"vad_threshold\": 0.5") != std::string::npos &&
                   content.find("\"history_prompt\": true") != std::string::npos &&
+                  content.find("\"speaker_aware_windows\": true") != std::string::npos &&
+                  content.find("\"volume_normalization\": true") != std::string::npos &&
                   content.find("\"acoustic_timestamps\": true") != std::string::npos,
                   "JSON must expose actual decoding settings for reproducible evaluation");
         } else {
+            check(content.find("different") == std::string::npos,
+                  "rejected candidates must never appear in delivered transcripts");
             check(content.find("[说话人 1]") != std::string::npos && content.find("[重叠发言]") != std::string::npos,
                   "human-readable formats need labels");
         }
@@ -272,8 +368,9 @@ void test_output(const std::filesystem::path& directory) {
         if (format == OutputFormat::Vtt) check(content.find("WEBVTT\n\n") == 0, "VTT header");
         if (format == OutputFormat::Text) {
             check(content.find("[00:00:00.000] [说话人 1] Hello") != std::string::npos &&
-                  content.find("[00:00:01.234] [重叠发言] [需复核] world") != std::string::npos,
-                  "text must locate uncertain meeting passages without changing their words");
+                  content.find("[00:00:01.234] [重叠发言] world") != std::string::npos &&
+                  content.find("[需复核]") == std::string::npos,
+                  "text must contain the selected transcript without manual-review tasks");
         }
     }
     check(!write_output(result, OutputFormat::Text, directory / "absent" / "file"), "write failure must propagate");
@@ -323,6 +420,12 @@ void test_output_edge_cases(const std::filesystem::path& directory) {
         check(std::filesystem::file_size(output) == before, "invalid output must retain previous file");
     }
     result.segments[0].confidence = .8;
+    result.decoding_reviews = {{0, 1000, "original", "candidate", .8,
+                               std::numeric_limits<double>::quiet_NaN(), false, {}}};
+    check(!write_output(result, OutputFormat::Json, output),
+          "non-finite rejected-candidate evidence must not corrupt JSON");
+    check(std::filesystem::file_size(output) == before, "invalid evidence must retain previous output");
+    result.decoding_reviews.clear();
     for (double invalid : {-1., std::numeric_limits<double>::quiet_NaN(),
                            std::numeric_limits<double>::infinity(), 1e30}) {
         result.segments[0].start_ms = invalid;
@@ -344,6 +447,8 @@ int main(int argc, char** argv) {
         test_text();
         test_acoustic_timing();
         test_approximate_speakers();
+        test_local_selection();
+        test_readable_text(directory);
         test_output(directory);
         test_output_edge_cases(directory);
     } catch (const std::exception& error) {

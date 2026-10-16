@@ -12,7 +12,7 @@ struct AudioChunk {
 
 class AudioReader {
 public:
-    explicit AudioReader(const std::filesystem::path& path);
+    explicit AudioReader(const std::filesystem::path& path, bool normalize_volume = false);
     ~AudioReader();
 
     // 禁用拷贝，允许移动

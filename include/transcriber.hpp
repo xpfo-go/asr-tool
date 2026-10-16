@@ -21,6 +21,9 @@ public:
     std::string error_message() const { return error_message_; }
 
 private:
+    TranscriptionResult transcribe_samples_impl(const std::vector<float>& samples,
+                                                const std::vector<float>& original_samples,
+                                                bool offline);
     struct Impl;
     std::unique_ptr<Impl> impl_;
     bool ready_ = false;

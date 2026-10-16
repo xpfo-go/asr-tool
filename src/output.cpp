@@ -46,6 +46,11 @@ bool valid_numbers(const TranscriptionResult& result) {
         if (!valid_time(correction.start_ms) || !valid_time(correction.end_ms) ||
             correction.end_ms < correction.start_ms) return false;
     }
+    for (const auto& review : result.decoding_reviews) {
+        if (!valid_time(review.start_ms) || !valid_time(review.end_ms) ||
+            review.end_ms < review.start_ms || !std::isfinite(review.original_score) ||
+            !std::isfinite(review.candidate_score)) return false;
+    }
     return true;
 }
 
@@ -138,18 +143,32 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
     switch (format) {
         case OutputFormat::Text: {
             if (!result.segments.empty()) {
+                Segment paragraph;
+                const auto flush = [&]() {
+                    const auto text = trim_copy(paragraph.text);
+                    if (text.empty()) return;
+                    if (result.speakers_available)
+                        os << '[' << ms_to_vtt_time(paragraph.start_ms) << "] ";
+                    os << speaker_label(paragraph, result.speakers_available) << text << '\n';
+                };
                 for (const auto& seg : result.segments) {
-                    const std::string line = trim_copy(seg.text);
-                    if (line.empty()) {
-                        continue;
+                    if (trim_copy(seg.text).empty()) continue;
+                    const bool same_speaker = paragraph.speaker == seg.speaker && paragraph.overlap == seg.overlap;
+                    if (!paragraph.text.empty() && same_speaker &&
+                        seg.start_ms >= paragraph.end_ms && seg.start_ms - paragraph.end_ms <= 1500.0 &&
+                        seg.end_ms - paragraph.start_ms <= 30000.0) {
+                        const auto last = static_cast<unsigned char>(paragraph.text.back());
+                        const auto first = static_cast<unsigned char>(seg.text.front());
+                        if (last < 128 && first < 128 && std::isalnum(last) && std::isalnum(first))
+                            paragraph.text += ' ';
+                        paragraph.text += seg.text;
+                        paragraph.end_ms = seg.end_ms;
+                    } else {
+                        flush();
+                        paragraph = seg;
                     }
-                    if (result.speakers_available || seg.needs_review) {
-                        os << '[' << ms_to_vtt_time(seg.start_ms) << "] ";
-                    }
-                    os << speaker_label(seg, result.speakers_available);
-                    if (seg.needs_review) os << "[需复核] ";
-                    os << line << "\n";
                 }
+                flush();
             } else {
                 const std::string text = trim_copy(result.full_text);
                 if (!text.empty()) {
@@ -213,11 +232,37 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                << ", \"vad_threshold\": " << settings.vad_threshold
                << ", \"acoustic_timestamps\": " << (settings.acoustic_timestamps ? "true" : "false")
                << ", \"history_prompt\": " << (settings.history_prompt ? "true" : "false")
+               << ", \"speaker_aware_windows\": " << (settings.speaker_aware_windows ? "true" : "false")
+               << ", \"local_token_selection\": " << (settings.local_token_selection ? "true" : "false")
+               << ", \"volume_normalization\": " << (settings.volume_normalization ? "true" : "false")
                << ", \"requested_language\": ";
             write_json_string(os, settings.requested_language);
             os << ", \"requested_backend\": ";
             write_json_string(os, settings.backend);
             os << "}";
+            os << ",\n  \"decoding_stats\": {\"windows\": " << result.decoded_windows
+               << ", \"retry_windows\": " << result.retried_windows
+               << ", \"local_retry_windows\": " << result.local_retry_windows << "}";
+            os << ",\n  \"decoding_reviews\": [";
+            for (size_t i = 0; i < result.decoding_reviews.size(); ++i) {
+                const auto& review = result.decoding_reviews[i];
+                if (i) os << ",";
+                os << "\n    {\"start\": " << std::setprecision(3) << review.start_ms / 1000.0
+                   << ", \"end\": " << review.end_ms / 1000.0 << ", \"original_text\": ";
+                write_json_string(os, review.original_text);
+                os << ", \"candidate_text\": ";
+                write_json_string(os, review.candidate_text);
+                os << ", \"original_score\": " << std::setprecision(6) << review.original_score
+                   << ", \"candidate_score\": " << review.candidate_score
+                   << ", \"selected\": " << (review.selected ? "true" : "false")
+                   << ", \"rejection_reasons\": [";
+                for (size_t j = 0; j < review.rejection_reasons.size(); ++j) {
+                    if (j) os << ", ";
+                    write_json_string(os, review.rejection_reasons[j]);
+                }
+                os << "]}";
+            }
+            os << "\n  ]";
             os << ",\n  \"speakers_available\": " << (result.speakers_available ? "true" : "false");
             os << ",\n  \"speaker_model\": ";
             write_json_string(os, result.speaker_model);
@@ -229,7 +274,13 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                    << ", \"end\": " << turn.end_ms / 1000.0 << ", \"speaker\": ";
                 if (turn.speaker < 0) os << "null";
                 else write_json_string(os, "speaker_" + std::to_string(turn.speaker + 1));
-                os << ", \"confidence\": " << std::setprecision(4) << turn.confidence << "}";
+                os << ", \"confidence\": " << std::setprecision(4) << turn.confidence;
+                if (turn.original_speaker >= 0) {
+                    os << ", \"original_speaker\": ";
+                    write_json_string(os, "speaker_" + std::to_string(turn.original_speaker + 1));
+                    os << ", \"attribution_method\": \"local_embedding_review\"";
+                }
+                os << "}";
             }
             os << "\n  ]";
             os << ",\n  \"warnings\": [";

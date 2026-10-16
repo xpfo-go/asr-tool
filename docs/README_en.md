@@ -6,6 +6,8 @@
 
 Local speech-to-text for meetings recorded on one device, with mixed-language transcription, speaker labels, and conservative correction. Audio, transcripts, and voice embeddings stay on your machine.
 
+File transcription automatically levels audio to help recognize quiet speech. Speaker analysis keeps the original audio. No additional settings are needed.
+
 Built on whisper.cpp, Silero VAD, and sherpa-onnx. The default ASR model is `ggml-large-v3-turbo-q8_0.bin`. macOS uses CoreML + Metal, retaining Metal when the CoreML encoder is absent. Linux/Windows retain CUDA with CPU fallback; diarization currently uses CPU.
 
 ---
@@ -129,8 +131,10 @@ local streaming recognizer for early text and locally re-decodes completed
 utterances with the Turbo model. Both models are prepared by the explicit
 `asr-tool --prepare-models` command; inference never calls a cloud service.
 
-Default `.txt` output is saved beside the input. Meeting text includes time
-positions, anonymous speaker labels, and review markers. Use `-o meeting.json`,
+Default `.txt` output is saved beside the input. The program automatically
+selects the transcript and groups consecutive speech into paragraphs with time
+positions and anonymous speaker labels. Internal review markers stay in JSON;
+there is no manual correction step. Use `-o meeting.json`,
 `-o meeting.srt`, or `-o meeting.vtt` to select the format; explicit `-f` takes
 precedence. Output cannot overwrite the input recording.
 
@@ -146,9 +150,9 @@ VAD skips silence and prefers pauses as window boundaries. Windows do not overla
 
 Local ERes2Net is the default speaker model. Existing WeSpeaker installations continue to work offline; `asr-tool --prepare-models` updates the cache. No speaker count, threshold, or configuration file is required. Acoustic alignment places text on the speaker timeline. When alignment fails, the complete utterance is kept together and receives a speaker only if the evidence is consistent throughout; otherwise its speaker is unknown. `--no-speakers` skips diarization and the additional alignment. JSON adds `speaker_model`, the independent `speaker_turns` timeline, and per-segment `review_reasons`. Public meeting evaluation and limitations are documented in [EVALUATION.md](EVALUATION.md).
 
-Overlapping speech has `overlap: true`; uncertain text has `needs_review: true`. Uncertain speakers are `null`. Brief interjections, distant microphones, and simultaneous speech still need review; the tool does not separate voices. Use `--no-speakers` to skip diarization. Missing speaker models produce a warning and text-only output; missing ASR/VAD models produce an error.
+Overlapping speech has `overlap: true`; uncertain text has `needs_review: true`. Uncertain speakers are `null`. Brief interjections, distant microphones, and simultaneous speech can still cause errors; the tool does not separate voices. Use `--no-speakers` to skip diarization. Missing speaker models produce a warning and text-only output; missing ASR/VAD models produce an error.
 
-Whole-recording PCM and the temporary WAV each need about 220MiB per hour, in addition to inference memory. At least 8GB RAM is recommended for long meetings.
+File transcription retains original and normalized PCM, requiring about 440MiB per hour, plus about 220MiB per hour for the temporary WAV and additional model and inference memory. At least 8GB RAM is recommended for long meetings.
 
 ## Build and Test
 

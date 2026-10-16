@@ -107,15 +107,13 @@ std::vector<uint32_t> wording(const std::string& text) {
 
 namespace {
 
-bool correction_is_bounded(const std::string& original, const std::string& candidate,
-                           double maximum_edit_fraction) {
-    if (!complete_utf8(original) || !complete_utf8(candidate) ||
-        sensitive_content(original) != sensitive_content(candidate)) {
-        return false;
-    }
+std::string correction_guard(const std::string& original, const std::string& candidate,
+                             double maximum_edit_fraction) {
+    if (!complete_utf8(original) || !complete_utf8(candidate)) return "invalid_utf8";
+    if (sensitive_content(original) != sensitive_content(candidate)) return "protected_content";
     const auto before = wording(original);
     const auto after = wording(candidate);
-    if (before.empty() || after.empty()) return before == after;
+    if (before.empty() || after.empty()) return before == after ? "" : "edit_limit";
     std::vector<size_t> distance(after.size() + 1);
     for (size_t j = 0; j < distance.size(); ++j) distance[j] = j;
     for (size_t i = 0; i < before.size(); ++i) {
@@ -127,20 +125,64 @@ bool correction_is_bounded(const std::string& original, const std::string& candi
             diagonal = previous;
         }
     }
-    return distance.back() <= std::max(before.size(), after.size()) * maximum_edit_fraction;
+    return distance.back() <= std::max(before.size(), after.size()) * maximum_edit_fraction
+        ? "" : "edit_limit";
 }
 
 }  // namespace
 
 bool correction_is_conservative(const std::string& original, const std::string& candidate) {
     // A higher token score alone must not justify rewriting a whole passage.
-    return correction_is_bounded(original, candidate, 0.25);
+    return correction_rejection_reason(original, candidate).empty();
+}
+
+std::string correction_rejection_reason(const std::string& original, const std::string& candidate) {
+    return correction_guard(original, candidate, 0.25);
 }
 
 bool correction_is_live_review_safe(const std::string& original, const std::string& candidate) {
     // Independent audio review can repair a bad streaming hypothesis, but it
     // still has to preserve sensitive content and stay within a bounded edit.
-    return correction_is_bounded(original, candidate, 0.60);
+    return correction_guard(original, candidate, 0.60).empty();
+}
+
+bool has_weak_token_span(const std::vector<ScoredToken>& tokens) {
+    for (size_t i = 0; i + 3 <= tokens.size(); ++i) {
+        double product = 1.0;
+        for (size_t j = i; j < i + 3; ++j) {
+            const double p = tokens[j].probability;
+            if (!std::isfinite(p) || p < 0 || p > 1) return false;
+            product *= p;
+        }
+        if (product < .45 * .45 * .45) return true;
+    }
+    return false;
+}
+
+bool local_correction_is_supported(const std::vector<ScoredToken>& original,
+                                   const std::vector<ScoredToken>& candidate) {
+    size_t begin = 0, before_end = original.size(), after_end = candidate.size();
+    while (begin < before_end && begin < after_end &&
+           original[begin].text == candidate[begin].text) ++begin;
+    while (before_end > begin && after_end > begin &&
+           original[before_end - 1].text == candidate[after_end - 1].text) {
+        --before_end;
+        --after_end;
+    }
+    // Deletions have no replacement acoustic evidence; keep the complete hypothesis.
+    if (begin == before_end || begin == after_end) return false;
+    const auto score = [begin](const auto& tokens, size_t end) {
+        double sum = 0;
+        for (size_t i = begin; i < end; ++i) {
+            const double p = tokens[i].probability;
+            if (!std::isfinite(p) || p < 0 || p > 1) return -1.0;
+            sum += std::log(std::max(1e-8, p));
+        }
+        return std::exp(sum / static_cast<double>(end - begin));
+    };
+    const double before = score(original, before_end);
+    const double after = score(candidate, after_end);
+    return before >= 0 && before < .75 && after >= .65 && after > before + .08;
 }
 
 double repetition_ratio(const std::vector<int32_t>& tokens) {
@@ -167,7 +209,8 @@ int choose_language(const std::vector<float>& probabilities, int previous_langua
 }
 
 std::vector<SpeechWindow> plan_speech_windows(
-    const std::vector<TimeRange>& speech, double duration_ms) {
+    const std::vector<TimeRange>& speech, double duration_ms,
+    const std::vector<SpeakerTurn>& turns) {
     std::vector<TimeRange> ranges;
     for (const auto& span : speech) {
         if (!std::isfinite(span.start_ms) || !std::isfinite(span.end_ms)) {
@@ -182,6 +225,17 @@ std::vector<SpeechWindow> plan_speech_windows(
     std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
         return a.start_ms < b.start_ms;
     });
+    // Multiple VAD passes can overlap or contain one another. Only gaps in their
+    // union are real pause candidates for splitting an ASR window.
+    std::vector<TimeRange> combined;
+    for (const auto& range : ranges) {
+        if (!combined.empty() && range.start_ms <= combined.back().end_ms) {
+            combined.back().end_ms = std::max(combined.back().end_ms, range.end_ms);
+        } else {
+            combined.push_back(range);
+        }
+    }
+    ranges = std::move(combined);
     std::vector<TimeRange> groups;
     for (const auto& span : ranges) {
         if (!groups.empty() && span.start_ms - groups.back().end_ms <= 4000.0) {
@@ -191,11 +245,31 @@ std::vector<SpeechWindow> plan_speech_windows(
         }
     }
 
+    std::vector<double> speaker_boundaries;
+    for (size_t i = 1; i < turns.size(); ++i) {
+        const auto& previous = turns[i - 1];
+        const auto& next = turns[i];
+        if (previous.speaker < 0 || next.speaker < 0 || previous.speaker == next.speaker ||
+            previous.confidence < 0.2 || next.confidence < 0.2 ||
+            previous.end_ms - previous.start_ms < 1500.0 ||
+            next.end_ms - next.start_ms < 1500.0 ||
+            next.start_ms < previous.end_ms || next.start_ms - previous.end_ms > 1000.0) continue;
+        const double boundary = (previous.end_ms + next.start_ms) / 2.0;
+        if (std::none_of(turns.begin(), turns.end(), [boundary](const auto& turn) {
+                return turn.start_ms < boundary && turn.end_ms > boundary;
+            })) speaker_boundaries.push_back(boundary);
+    }
+
     std::vector<SpeechWindow> windows;
     for (const auto& group : groups) {
         double begin = group.start_ms;
         while (begin < group.end_ms) {
             double end = std::min(begin + 26000.0, group.end_ms);
+            // Keep enough context for ASR, but prefer a clean change of speaker.
+            const auto boundary = std::lower_bound(speaker_boundaries.begin(), speaker_boundaries.end(),
+                                                   begin + 6000.0);
+            if (boundary != speaker_boundaries.end() && *boundary <= end &&
+                group.end_ms - *boundary >= 3000.0) end = *boundary;
             if (end < group.end_ms) {
                 // Prefer a real pause near the boundary; keep continuous speech intact.
                 for (size_t i = 1; i < ranges.size(); ++i) {
@@ -348,9 +422,28 @@ SpeakerAssignment assign_speaker(double start_ms, double end_ms,
     if (assignment.overlap) {
         return assignment;
     }
+    // DTW gives token starts: the interval to the next token may include a
+    // brief pause. Bridge only gaps bounded by the same supported speaker.
+    for (size_t i = 1; i < turns.size(); ++i) {
+        const auto& left = turns[i - 1];
+        const auto& right = turns[i];
+        if (left.speaker < 0 || left.speaker != right.speaker ||
+            (left.confidence < 0.0 && left.confidence != -2.0) ||
+            (right.confidence < 0.0 && right.confidence != -2.0) ||
+            left.end_ms >= right.start_ms || right.start_ms - left.end_ms > 500.0 ||
+            left.end_ms <= start_ms || right.start_ms >= end_ms) continue;
+        const bool contested = std::any_of(turns.begin(), turns.end(), [&](const auto& turn) {
+            return turn.start_ms < right.start_ms && turn.end_ms > left.end_ms &&
+                   (turn.speaker != left.speaker || (turn.confidence < 0.0 && turn.confidence != -2.0));
+        });
+        if (!contested) intervals[left.speaker].push_back({left.end_ms, right.start_ms});
+    }
     double best = 0.0;
     double second = 0.0;
-    for (const auto& item : intervals) {
+    for (auto& item : intervals) {
+        std::sort(item.second.begin(), item.second.end(), [](const auto& a, const auto& b) {
+            return a.start_ms < b.start_ms;
+        });
         double covered = 0.0;
         double previous_end = start_ms;
         for (const auto& interval : item.second) {

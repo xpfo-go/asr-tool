@@ -1,13 +1,16 @@
 #include "diarizer.hpp"
 #include "model_manager.hpp"
+#include "speaker_refinement.hpp"
 
 #include <sherpa-onnx/c-api/c-api.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 
 namespace {
 
@@ -104,4 +107,64 @@ std::vector<SpeakerTurn> diarize(const std::vector<float>& samples,
 } catch (...) {
     error = "Speaker analysis failed; check local models";
     return {};
+}
+
+size_t refine_diarization(const std::vector<float>& samples,
+                         const std::filesystem::path& model_dir,
+                         std::vector<SpeakerTurn>& turns, std::string& error) try {
+    error.clear();
+    if (samples.empty() || turns.empty()) return 0;
+    const auto model = model_dir / SPEAKER_MODEL_FILENAME;
+    std::error_code ec;
+    if (std::filesystem::file_size(model, ec) != 39593761 || ec) {
+        error = "Speaker refinement skipped: updated ERes2Net model unavailable";
+        return 0;
+    }
+    using Extractor = std::unique_ptr<const SherpaOnnxSpeakerEmbeddingExtractor,
+                                     decltype(&SherpaOnnxDestroySpeakerEmbeddingExtractor)>;
+    Extractor extractor(nullptr, SherpaOnnxDestroySpeakerEmbeddingExtractor);
+    const std::string filename = model.string();
+    auto result = refine_speaker_turns(turns, [&](double start, double end) {
+        if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end * 16 > samples.size())
+            throw std::runtime_error("Speaker refinement range outside audio");
+        const auto first = static_cast<size_t>(std::llround(start * 16));
+        const auto last = static_cast<size_t>(std::llround(end * 16));
+        if (last <= first || last > samples.size() || last - first > 48000)
+            throw std::runtime_error("Invalid speaker refinement crop");
+        // Lazy loading avoids initializing a model when seeds or the work budget are insufficient.
+        if (!extractor) {
+            SherpaOnnxSpeakerEmbeddingExtractorConfig config{};
+            config.model = filename.c_str();
+            config.num_threads = 1;
+            config.provider = "cpu";
+            extractor.reset(SherpaOnnxCreateSpeakerEmbeddingExtractor(&config));
+            if (!extractor) throw std::runtime_error("Speaker refinement model initialization failed");
+        }
+        using Stream = std::unique_ptr<const SherpaOnnxOnlineStream, decltype(&SherpaOnnxDestroyOnlineStream)>;
+        Stream stream(SherpaOnnxSpeakerEmbeddingExtractorCreateStream(extractor.get()), SherpaOnnxDestroyOnlineStream);
+        if (!stream) throw std::runtime_error("Speaker refinement stream initialization failed");
+        SherpaOnnxOnlineStreamAcceptWaveform(stream.get(), 16000, samples.data() + first,
+                                           static_cast<int32_t>(last - first));
+        SherpaOnnxOnlineStreamInputFinished(stream.get());
+        if (!SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor.get(), stream.get()))
+            throw std::runtime_error("Speaker refinement embedding not ready");
+        using Embedding = std::unique_ptr<const float, decltype(&SherpaOnnxSpeakerEmbeddingExtractorDestroyEmbedding)>;
+        Embedding value(SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(extractor.get(), stream.get()),
+                        SherpaOnnxSpeakerEmbeddingExtractorDestroyEmbedding);
+        const int dimension = SherpaOnnxSpeakerEmbeddingExtractorDim(extractor.get());
+        if (!value || dimension <= 0) throw std::runtime_error("Speaker refinement embedding failed");
+        return std::vector<float>(value.get(), value.get() + dimension);
+    });
+    error = result.notice;
+    if (result.changed_regions) turns.swap(result.turns);
+    (void)fprintf(stderr, "[INFO] 说话人复核: %zu 处调整, %zu 次声纹提取, %zu 个可靠说话人%s%s\n",
+                  result.changed_regions, result.embeddings_requested, result.reliable_speakers,
+                  error.empty() ? "" : "; ", error.c_str());
+    return result.changed_regions;
+} catch (const std::exception& e) {
+    error = "Speaker refinement failed; original turns retained: " + std::string(e.what());
+    return 0;
+} catch (...) {
+    error = "Speaker refinement failed; original turns retained";
+    return 0;
 }

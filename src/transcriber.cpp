@@ -24,6 +24,7 @@ constexpr float VAD_THRESHOLD = 0.5f;
 
 struct DecodeResult {
     std::vector<TimedText> tokens;
+    std::vector<ScoredToken> scores;
     std::string text;
     std::string language;
     double confidence = 0.0;
@@ -32,6 +33,31 @@ struct DecodeResult {
     bool success = false;
     int confident_language = -1;
 };
+
+struct WindowResult {
+    DecodeResult decoded;
+    std::vector<whisper_token> prompt;
+    std::vector<std::string> reasons;
+    bool local_review = false;
+};
+
+void record_review(TranscriptionResult& result, const SpeechWindow& window,
+                   const DecodeResult& original, const DecodeResult& candidate,
+                   const std::string& guard, bool score_supported, bool selected) {
+    DecodingReview review{window.audio.start_ms, window.audio.end_ms,
+        original.text, candidate.text, original.confidence, candidate.confidence, selected, {}};
+    if (!candidate.success) {
+        review.rejection_reasons.push_back("decode_failed");
+    } else if (!selected) {
+        if (!guard.empty()) review.rejection_reasons.push_back(guard);
+        if (candidate.repetitive) review.rejection_reasons.push_back("repetitive_candidate");
+        if (candidate.repetition > original.repetition)
+            review.rejection_reasons.push_back("repetition_increased");
+        if (!score_supported) review.rejection_reasons.push_back("insufficient_score_gain");
+        if (candidate.text == original.text) review.rejection_reasons.push_back("unchanged");
+    }
+    result.decoding_reviews.push_back(std::move(review));
+}
 
 std::vector<whisper_token> tokenize(whisper_context* ctx, const std::string& text) {
     if (text.empty()) {
@@ -110,6 +136,7 @@ DecodeResult decode(whisper_context* ctx, const float* samples, int count,
             const double token_end = std::clamp(t1, token_start, std::max(token_start, end));
             previous = token_start;
             segment_tokens.push_back({raw, token_start, token_end, i});
+            result.scores.push_back({raw, data.p});
             acoustic_times.push_back(data.t_dtw * 10.0);
             result.text += raw;
             ids.push_back(data.id);
@@ -194,8 +221,16 @@ Transcriber::~Transcriber() = default;
 
 TranscriptionResult Transcriber::transcribe(const std::filesystem::path& audio_path) {
     try {
-        auto reader = open_audio(audio_path);
-        return transcribe_samples(reader.read_all());
+        const auto samples = AudioReader(audio_path, true).read_all();
+        // Gain adjustment helps quiet speech but must not change the voice embeddings.
+        const auto original_samples = AudioReader(audio_path).read_all();
+        if (samples.size() != original_samples.size()) {
+            error_message_ = "Audio normalization changed the recording duration";
+            return {};
+        }
+        auto result = transcribe_samples_impl(samples, original_samples, true);
+        result.decoding_settings.volume_normalization = true;
+        return result;
     } catch (const std::exception& e) {
         error_message_ = e.what();
         return {};
@@ -206,9 +241,18 @@ TranscriptionResult Transcriber::transcribe(const std::filesystem::path& audio_p
 }
 
 TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& samples) {
+    // Live review already compares against the streaming result. Extra decoding
+    // here would perturb the sampler used by the next live utterance.
+    return transcribe_samples_impl(samples, samples, false);
+}
+
+TranscriptionResult Transcriber::transcribe_samples_impl(const std::vector<float>& samples,
+                                                        const std::vector<float>& original_samples,
+                                                        bool offline) {
     TranscriptionResult result;
     result.model_name = impl_->model_path.stem().string();
     result.decoding_settings = impl_->decoding_settings;
+    result.decoding_settings.local_token_selection = offline;
     result.duration_seconds = samples.size() / SAMPLE_RATE;
     if (!ready_) {
         return result;
@@ -225,20 +269,25 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
     speech_params.min_silence_duration_ms = 300;
     speech_params.speech_pad_ms = 200;
     using Speech = std::unique_ptr<whisper_vad_segments, decltype(&whisper_vad_free_segments)>;
-    Speech speech(whisper_vad_segments_from_samples(impl_->vad.get(), speech_params, samples.data(),
-                                                   static_cast<int>(samples.size())),
-                  whisper_vad_free_segments);
-    if (!speech) {
-        error_message_ = "语音活动检测失败";
-        return result;
-    }
     std::vector<TimeRange> spans;
-    for (int i = 0; i < whisper_vad_segments_n_segments(speech.get()); ++i) {
-        spans.push_back({whisper_vad_segments_get_segment_t0(speech.get(), i) * 10.0,
-                         whisper_vad_segments_get_segment_t1(speech.get(), i) * 10.0});
+    // Leveling may move VAD decisions in either direction. Preserve speech found
+    // in the original audio as well as the newly recovered quiet speech.
+    const std::vector<float>* vad_inputs[] = {&samples, &original_samples};
+    for (int pass = 0; pass < (offline ? 2 : 1); ++pass) {
+        const auto& input = *vad_inputs[pass];
+        Speech speech(whisper_vad_segments_from_samples(impl_->vad.get(), speech_params, input.data(),
+                                                       static_cast<int>(input.size())),
+                      whisper_vad_free_segments);
+        if (!speech) {
+            error_message_ = "语音活动检测失败";
+            return result;
+        }
+        for (int i = 0; i < whisper_vad_segments_n_segments(speech.get()); ++i) {
+            spans.push_back({whisper_vad_segments_get_segment_t0(speech.get(), i) * 10.0,
+                             whisper_vad_segments_get_segment_t1(speech.get(), i) * 10.0});
+        }
     }
-    const auto windows = plan_speech_windows(spans, result.duration_seconds * 1000.0);
-    if (windows.empty()) {
+    if (spans.empty()) {
         result.success = true;
         result.warnings.push_back("未检测到语音");
         return result;
@@ -246,9 +295,21 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
     std::vector<SpeakerTurn> turns;
     if (impl_->speakers) {
         std::string error;
-        turns = diarize(samples, model_dir, error, result.speaker_model);
+        turns = diarize(original_samples, model_dir, error, result.speaker_model);
         result.speaker_turns = turns;
         result.speakers_available = !turns.empty();
+        if (!error.empty()) {
+            result.warnings.push_back(error);
+            (void)fprintf(stderr, "[WARN] %s\n", error.c_str());
+        }
+    }
+    const auto windows = plan_speech_windows(spans, result.duration_seconds * 1000.0, turns);
+    result.decoding_settings.speaker_aware_windows = !turns.empty();
+    // Freeze ASR windows before reviewing labels so speaker corrections cannot alter the words.
+    if (!turns.empty()) {
+        std::string error;
+        refine_diarization(original_samples, model_dir, turns, error);
+        result.speaker_turns = turns;
         if (!error.empty()) {
             result.warnings.push_back(error);
             (void)fprintf(stderr, "[WARN] %s\n", error.c_str());
@@ -262,6 +323,8 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
         result.warnings.push_back("prompt 超过 160 tokens，仅使用末尾术语；请缩短提示文本");
     }
     std::vector<whisper_token> history;
+    std::vector<WindowResult> first_pass;
+    first_pass.reserve(windows.size());
     double previous_end = -10000.0;
     int previous_language = -1;
     for (size_t i = 0; i < windows.size(); ++i) {
@@ -277,24 +340,32 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
         auto decoded = decode(impl_->ctx, samples.data() + begin, static_cast<int>(end - begin),
                               impl_->language, prompt, impl_->decoding_settings,
                               0, previous_language);
+        ++result.decoded_windows;
         const int confident_language = decoded.confident_language;
         bool review = !decoded.success || decoded.confidence < settings.review_threshold || decoded.repetitive;
         bool correction_rejected = false;
+        const bool local_review = offline && !review && has_weak_token_span(decoded.scores);
         if (review) {
+            ++result.retried_windows;
             const auto retry = decode(impl_->ctx, samples.data() + begin, static_cast<int>(end - begin),
                                       decoded.success ? decoded.language : impl_->language, prompt,
                                       settings, settings.retry_beam_size);
-            const bool safe = !decoded.success || correction_is_conservative(decoded.text, retry.text);
-            if (retry.success && (!decoded.success ||
+            const auto guard = decoded.success ? correction_rejection_reason(decoded.text, retry.text) : "";
+            const bool safe = guard.empty();
+            const bool score_supported =
+                retry.confidence > decoded.confidence + settings.correction_confidence_gain;
+            const bool selected = retry.success && (!decoded.success ||
                 (safe && !retry.repetitive && retry.repetition <= decoded.repetition &&
-                 retry.confidence > decoded.confidence + settings.correction_confidence_gain))) {
+                 score_supported));
+            record_review(result, window, decoded, retry, guard, score_supported, selected);
+            if (selected) {
                 if (retry.text != decoded.text && decoded.success) {
                     result.corrections.push_back({window.audio.start_ms, window.audio.end_ms,
                                                    decoded.text, retry.text, "local_beam_redecode"});
                 }
                 decoded = retry;
             }
-            review = decoded.confidence < settings.review_threshold || decoded.repetitive || !safe;
+            review = decoded.confidence < settings.review_threshold || decoded.repetitive;
             correction_rejected = retry.success && !safe;
         }
         if (!decoded.success) {
@@ -317,10 +388,52 @@ TranscriptionResult Transcriber::transcribe_samples(const std::vector<float>& sa
             history.erase(history.begin(), history.end() - 64);
         }
         previous_end = window.audio.end_ms;
+        first_pass.push_back({std::move(decoded), std::move(prompt), std::move(reasons), local_review});
         (void)fprintf(stderr, "[INFO] 转写: %zu/%zu (%.0f%%)%s\n", i + 1, windows.size(),
                       window.ownership.end_ms / (result.duration_seconds * 1000.0) * 100.0,
-                      review ? " [需复核]" : "");
+                      review ? " [自动选优完成]" : "");
     }
+    // Beam retries advance Whisper's shared sampler state, even when rejected.
+    // Finish the initial transcript first so extra review cannot perturb later windows.
+    result.segments.clear();
+    result.full_text.clear();
+    for (size_t i = 0; i < windows.size(); ++i) {
+        auto& saved = first_pass[i];
+        auto& decoded = saved.decoded;
+        const auto& window = windows[i];
+        if (saved.local_review) {
+            ++result.retried_windows;
+            ++result.local_retry_windows;
+            const size_t begin = static_cast<size_t>(window.audio.start_ms * SAMPLE_RATE / 1000.0);
+            const size_t end = std::min(samples.size(), static_cast<size_t>(window.audio.end_ms * SAMPLE_RATE / 1000.0));
+            const auto& settings = impl_->decoding_settings;
+            auto retry = decode(impl_->ctx, samples.data() + begin, static_cast<int>(end - begin),
+                                decoded.language, saved.prompt, settings, settings.retry_beam_size);
+            const auto guard = correction_rejection_reason(decoded.text, retry.text);
+            const bool safe = guard.empty();
+            const bool local_support = retry.confidence >= decoded.confidence &&
+                local_correction_is_supported(decoded.scores, retry.scores);
+            const bool score_supported =
+                retry.confidence > decoded.confidence + settings.correction_confidence_gain || local_support;
+            const bool selected = retry.success && safe && !retry.repetitive &&
+                                  retry.repetition <= decoded.repetition && score_supported;
+            record_review(result, window, decoded, retry, guard, score_supported, selected);
+            if (selected) {
+                if (retry.text != decoded.text) {
+                    result.corrections.push_back({window.audio.start_ms, window.audio.end_ms,
+                        decoded.text, retry.text, local_support ? "local_token_redecode" : "local_beam_redecode"});
+                }
+                decoded = std::move(retry);
+            } else if (retry.success && !safe) {
+                saved.reasons.push_back("correction_rejected");
+            }
+            (void)fprintf(stderr, "[INFO] 自动选优: %zu/%zu\n", i + 1, windows.size());
+        }
+        append_decoded_window(result, decoded.tokens, window, turns, decoded.confidence, saved.reasons);
+    }
+    std::stable_sort(result.corrections.begin(), result.corrections.end(), [](const auto& a, const auto& b) {
+        return a.start_ms < b.start_ms;
+    });
     result.success = true;
     return result;
 }

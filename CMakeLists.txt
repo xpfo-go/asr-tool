@@ -130,6 +130,7 @@ add_executable(${ASR_TARGET_NAME}
     src/output.cpp
     src/meeting.cpp
     src/diarizer.cpp
+    src/speaker_refinement.cpp
     src/live.cpp
     src/streaming.cpp
 )
@@ -256,7 +257,7 @@ if(BUILD_TESTING)
     set_tests_properties(live PROPERTIES TIMEOUT 15)
     add_executable(live_replay_candidate EXCLUDE_FROM_ALL tests/evaluation/live_replay.cpp
         src/live.cpp src/streaming.cpp src/audio.cpp src/transcriber.cpp src/meeting.cpp
-        src/diarizer.cpp src/model_manager.cpp src/output.cpp src/platform.cpp)
+        src/diarizer.cpp src/speaker_refinement.cpp src/model_manager.cpp src/output.cpp src/platform.cpp)
     target_include_directories(live_replay_candidate PRIVATE include)
     target_link_libraries(live_replay_candidate PRIVATE whisper asr_sherpa Threads::Threads)
     target_compile_options(live_replay_candidate PRIVATE
@@ -389,6 +390,12 @@ if(BUILD_TESTING)
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /utf-8>)
     add_test(NAME meeting COMMAND meeting_test "${CMAKE_CURRENT_BINARY_DIR}/test-output")
+    add_executable(speaker_refinement_test tests/speaker_refinement_test.cpp src/speaker_refinement.cpp)
+    target_include_directories(speaker_refinement_test PRIVATE include)
+    target_compile_options(speaker_refinement_test PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /utf-8>)
+    add_test(NAME speaker_refinement COMMAND speaker_refinement_test)
     add_test(NAME cli_validation COMMAND ${CMAKE_COMMAND}
         "-DASR_BINARY=$<TARGET_FILE:${ASR_TARGET_NAME}>"
         "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/cli-test-output"

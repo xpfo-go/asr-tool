@@ -19,6 +19,7 @@ struct SpeakerTurn {
     double end_ms = 0.0;
     int speaker = -1;
     double confidence = -2.0;
+    int original_speaker = -1;
 };
 
 struct Correction {
@@ -29,6 +30,17 @@ struct Correction {
     std::string reason;
 };
 
+struct DecodingReview {
+    double start_ms = 0.0;
+    double end_ms = 0.0;
+    std::string original_text;
+    std::string candidate_text;
+    double original_score = 0.0;
+    double candidate_score = 0.0;
+    bool selected = false;
+    std::vector<std::string> rejection_reasons;
+};
+
 struct DecodingSettings {
     int threads = 1;
     int retry_beam_size = 5;
@@ -37,6 +49,9 @@ struct DecodingSettings {
     float vad_threshold = 0.5f;
     bool acoustic_timestamps = false;
     bool history_prompt = true;
+    bool speaker_aware_windows = false;
+    bool local_token_selection = false;
+    bool volume_normalization = false;
     std::string backend;
     std::string requested_language;
 };
@@ -50,10 +65,14 @@ struct TranscriptionResult {
     bool success = false;
     bool speakers_available = false;
     std::vector<Correction> corrections;
+    std::vector<DecodingReview> decoding_reviews;
     std::vector<std::string> warnings;
     std::vector<SpeakerTurn> speaker_turns;
     std::string speaker_model;
     DecodingSettings decoding_settings;
+    int decoded_windows = 0;
+    int retried_windows = 0;
+    int local_retry_windows = 0;
 };
 
 enum class OutputFormat {

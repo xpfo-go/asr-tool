@@ -51,6 +51,14 @@ int main(int argc, char** argv) {
             check(first.is_eof() && first.read_chunk().samples.empty(), "EOF must match data boundary");
             check(second.read_all() == chunk.samples, "simultaneous readers must own separate temporary files");
         }
+        const auto normalized = directory.path() / "normalized.wav";
+        fixture(normalized, false);
+        check(AudioReader(normalized, true).read_all() == std::vector<float>({.25f, -.5f}),
+              "offline normalization must pass the bounded filter to FFmpeg");
+        bool filter_rejected = false;
+        try { AudioReader reader(normalized); }
+        catch (const std::runtime_error&) { filter_rejected = true; }
+        check(filter_rejected, "a failed FFmpeg preprocessing command must fail the read");
         fixture(input, true);
         bool rejected = false;
         try { AudioReader reader(input); reader.read_chunk(); }

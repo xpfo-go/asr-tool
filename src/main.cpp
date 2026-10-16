@@ -451,12 +451,6 @@ int main(int argc, char* argv[]) try {
     if (!result.language.empty()) {
         (void)printf("[INFO] 检测语言: %s\n", result.language.c_str());
     }
-    const auto review_count = std::count_if(result.segments.begin(), result.segments.end(),
-        [](const Segment& segment) { return segment.needs_review; });
-    if (review_count) {
-        (void)fprintf(stderr, "[INFO] %zu 个片段需核对文字、时间或说话人；标记不代表错误率\n",
-                      static_cast<size_t>(review_count));
-    }
 
     // 使用 _Exit 避免 ggml-metal 退出时的断言问题
     (void)fflush(nullptr);

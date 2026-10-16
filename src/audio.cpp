@@ -54,17 +54,20 @@ std::wstring quote_windows_argument(const std::wstring& argument) {
 
 // 执行子进程 (无 shell，防止命令注入)
 // 所有平台均使用 argv 数组，不经过 shell
-int run_ffmpeg(const std::filesystem::path& input_path, const std::filesystem::path& output_path) {
+int run_ffmpeg(const std::filesystem::path& input_path, const std::filesystem::path& output_path,
+               bool normalize_volume) {
+    const char* filter = normalize_volume ? "dynaudnorm=f=500:g=31:p=0.95:m=10" : nullptr;
+#ifdef ASR_EXPERIMENT_AUDIO_FILTER
+    filter = ASR_EXPERIMENT_AUDIO_FILTER;
+#endif
 #ifdef _WIN32
-    const std::vector<std::wstring> arguments = {
+    std::vector<std::wstring> arguments = {
         L"ffmpeg", L"-y", L"-nostdin", L"-protocol_whitelist", L"file,pipe",
         L"-i", input_path.native(), L"-ar", std::to_wstring(SAMPLE_RATE),
         L"-ac", std::to_wstring(CHANNELS),
-#ifdef ASR_EXPERIMENT_AUDIO_FILTER
-        L"-af", std::filesystem::u8path(ASR_EXPERIMENT_AUDIO_FILTER).native(),
-#endif
-        L"-f", L"wav", L"-acodec", L"pcm_f32le", output_path.native(),
     };
+    if (filter) arguments.insert(arguments.end(), {L"-af", std::filesystem::u8path(filter).native()});
+    arguments.insert(arguments.end(), {L"-f", L"wav", L"-acodec", L"pcm_f32le", output_path.native()});
     std::wstring cmd_line;
     for (const auto& argument : arguments) {
         if (!cmd_line.empty()) cmd_line += L' ';
@@ -98,7 +101,7 @@ int run_ffmpeg(const std::filesystem::path& input_path, const std::filesystem::p
     // 预构建 argv 数组，保持字符串生命周期
     std::string arg_ar = std::to_string(SAMPLE_RATE);
     std::string arg_ac = std::to_string(CHANNELS);
-    const char* ffmpeg_argv[] = {
+    std::vector<const char*> ffmpeg_argv = {
         "ffmpeg",
         "-y",
         "-nostdin",
@@ -110,21 +113,14 @@ int run_ffmpeg(const std::filesystem::path& input_path, const std::filesystem::p
         arg_ar.c_str(),
         "-ac",
         arg_ac.c_str(),
-#ifdef ASR_EXPERIMENT_AUDIO_FILTER
-        "-af",
-        ASR_EXPERIMENT_AUDIO_FILTER,
-#endif
-        "-f",
-        "wav",
-        "-acodec",
-        "pcm_f32le",
-        output_path.c_str(),
-        nullptr,
     };
+    if (filter) ffmpeg_argv.insert(ffmpeg_argv.end(), {"-af", filter});
+    ffmpeg_argv.insert(ffmpeg_argv.end(), {"-f", "wav", "-acodec", "pcm_f32le",
+                                         output_path.c_str(), nullptr});
 
     pid_t pid;
     int status = posix_spawnp(&pid, "ffmpeg", nullptr, nullptr,
-                              const_cast<char* const*>(ffmpeg_argv), environ);
+                              const_cast<char* const*>(ffmpeg_argv.data()), environ);
     if (status != 0) {
         return -1;
     }
@@ -160,7 +156,7 @@ struct AudioReader::Impl {
     }
 };
 
-AudioReader::AudioReader(const std::filesystem::path& path)
+AudioReader::AudioReader(const std::filesystem::path& path, bool normalize_volume)
     : impl_(std::make_unique<Impl>()) {
     eof_ = false;
     total_duration_seconds_ = 0.0;
@@ -170,7 +166,7 @@ AudioReader::AudioReader(const std::filesystem::path& path)
     auto temp_path = impl_->temp_directory.path() / "audio.wav";
 
     (void)printf("[INFO] 转换音频格式: %s\n", path.filename().u8string().c_str());
-    int ret = run_ffmpeg(path, temp_path);
+    int ret = run_ffmpeg(path, temp_path, normalize_volume);
     if (ret != 0) {
         throw std::runtime_error("FFmpeg 转换失败 (退出码: " +
                                  std::to_string(ret) + ")");
