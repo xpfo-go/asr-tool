@@ -273,15 +273,23 @@ int main(int argc, char* argv[]) {
             (void)fprintf(stderr, "[ERROR] --prepare-models 不接受录音文件，请单独运行\n");
             return 1;
         }
-        const auto model_path = get_default_model_path(model_dir);
-        if (!ensure_main_model(model_path, true) ||
-            !prepare_meeting_models(model_path.parent_path()) ||
-            !prepare_streaming_model(model_path.parent_path())) {
+        try {
+            const auto model_path = get_default_model_path(model_dir);
+            if (!ensure_main_model(model_path, true) ||
+                !prepare_meeting_models(model_path.parent_path()) ||
+                !prepare_streaming_model(model_path.parent_path())) {
+                return 3;
+            }
+#if defined(__APPLE__)
+            (void)ensure_coreml_encoder_model(model_path, true);
+#endif
+        } catch (const std::exception& error) {
+            (void)fprintf(stderr, "[ERROR] Model preparation failed: %s\n", error.what());
+            return 3;
+        } catch (...) {
+            (void)fprintf(stderr, "[ERROR] Model preparation failed; check cache permissions and free space\n");
             return 3;
         }
-#if defined(__APPLE__)
-        (void)ensure_coreml_encoder_model(model_path, true);
-#endif
         (void)printf("[DONE] 本地模型已就绪，转写时不会联网\n");
         return 0;
     }
