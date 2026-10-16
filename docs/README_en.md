@@ -29,7 +29,7 @@ curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.
 To try this candidate after publication, without changing the stable `latest`:
 
 ```bash
-curl -fsSL https://github.com/xpfo-go/asr-tool/releases/download/v2.0.0-rc/install.sh | ASR_TOOL_RELEASE_TAG=v2.0.0-rc bash
+curl -fsSL https://github.com/xpfo-go/asr-tool/releases/download/v2.0.0-rc.1/install.sh | ASR_TOOL_RELEASE_TAG=v2.0.0-rc.1 bash
 ```
 
 The installer automatically:

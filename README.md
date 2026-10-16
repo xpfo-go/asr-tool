@@ -30,7 +30,7 @@ curl -fsSL https://github.com/xpfo-go/asr-tool/releases/latest/download/install.
 试用本次候选版（发布完成后可用，稳定版 `latest` 不受影响）：
 
 ```bash
-curl -fsSL https://github.com/xpfo-go/asr-tool/releases/download/v2.0.0-rc/install.sh | ASR_TOOL_RELEASE_TAG=v2.0.0-rc bash
+curl -fsSL https://github.com/xpfo-go/asr-tool/releases/download/v2.0.0-rc.1/install.sh | ASR_TOOL_RELEASE_TAG=v2.0.0-rc.1 bash
 ```
 
 脚本会自动完成这些事情：
