@@ -97,6 +97,21 @@ jobs:
         with:
           cuda: '12.4.1'
 
+      - name: Check Windows model preparation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DASR_ENABLE_CUDA=OFF
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target model_manager_test --parallel 4 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/model-check.log"
+          if ($LASTEXITCODE -ne 0) {
+            $message = (Select-String -Path "$env:RUNNER_TEMP/model-check.log" -Pattern 'error |fatal error|LNK[0-9]+' | Select-Object -Last 30) -join "`n"
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows model check::$message"
+            exit 1
+          }
+          ctest --test-dir build -C Release -R '^model_manager$' --output-on-failure
+
       - name: Install CUDA Toolkit (Windows)
         if: runner.os == 'Windows'
         uses: Jimver/cuda-toolkit@v0.2.24
@@ -142,7 +157,15 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cmake --build build --config Release --parallel 4
+        run: |
+          cmake --build build --config Release --parallel 4 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/build-windows.log"
+          if ($LASTEXITCODE -ne 0) {
+            $message = (Select-String -Path "$env:RUNNER_TEMP/build-windows.log" -Pattern 'error |fatal error|LNK[0-9]+' | Select-Object -Last 30) -join "`n"
+            if (!$message) { $message = (Get-Content "$env:RUNNER_TEMP/build-windows.log" -Tail 40) -join "`n" }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows build::$message"
+            exit 1
+          }
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
