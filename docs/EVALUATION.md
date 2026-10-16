@@ -6,10 +6,11 @@ the ignored `.cache/evaluation/` directory. No private meeting recording is
 needed for this stage. The application has no Python evaluation dependency.
 
 The v2.0.0-rc file candidate has now run the frozen meeting acceptance split.
-It fails the commercial text and speaker gates. Product direction has been
-closed for this release in [PRODUCT_DIRECTIONS.md](PRODUCT_DIRECTIONS.md):
-retain the measured default, improve usability, and publish a prerelease with
-the failures visible. No private recording or microphone is used in this run.
+Commercial-grade accuracy remains a long-term goal, not a release requirement
+for this version. The numerical targets below guide future optimization.
+Product direction is recorded in [PRODUCT_DIRECTIONS.md](PRODUCT_DIRECTIONS.md):
+retain the measured default, improve usability, and publish the observed results
+with the prerelease. No private recording or microphone is used in this run.
 
 ## RC Meeting Acceptance (2026-10-16)
 
@@ -42,11 +43,10 @@ Product executable SHA-256:
 Manifest SHA-256:
 `e6f55491fd37e78d4cf5b38d01c47d73d51fb89c4a912ba680ef0f847d5d0fef`.
 
-This split was reserved before model selection and is now consumed. The failed
-result is a release limitation; no thresholds, models, or segmentation were
-tuned on these results. Future tuning on these recordings makes them development
-data and requires a new acceptance split. The release is **v2.0.0-rc**, not a
-commercial-quality release, and private meeting validation remains paused.
+This split was reserved before model selection and is now consumed. No
+thresholds, models, or segmentation were tuned on these results. Future tuning
+on these recordings makes them development data and requires a new acceptance
+split. Private meeting validation remains paused for **v2.0.0-rc**.
 
 ## RC Mixed-Language Acceptance (2026-10-16)
 
@@ -1615,6 +1615,14 @@ Replay executable SHA-256:
 The replay executable substitutes file-fed PCM for AVAudioEngine; the actual
 microphone permission, resampling, and device lifecycle remain unverified.
 
+An additional paced replay of the complete 26.23-minute R8001 development
+meeting was attempted with the same binary and models. The resource guard
+stopped it during warmup when macOS memory pressure reached level 2, before
+the event stream began. No latency or accuracy score is assigned to this run.
+The manifest and failure log are retained under
+`.cache/evaluation/v2.0.0-rc-live-sustained-r8001/`. Its inference process tree
+was terminated by the guard; long-session performance remains unverified.
+
 ### Remaining Limits
 
 The remaining error is substantial. Short interjections, distant speech,
@@ -1622,8 +1630,7 @@ overlap, microphone placement, language switching, and specialized terms need
 human review. A label count is not a reliable estimate of the actual meeting
 headcount.
 
-The project therefore does not claim commercial-grade accuracy. A commercial
-acceptance target requires an organization-owned, consented evaluation set with
+Further accuracy validation requires an organization-owned, consented evaluation set with
 word-level transcripts, speaker time annotations, representative microphone
 conditions, and fixed latency/RAM limits. Changes should be accepted only after
 the same set is re-run and the text, diarization, review workload, and resource
@@ -1637,6 +1644,6 @@ Chinese-native candidates must improve fixed public development cases before
 changing defaults. Clear Mandarin has a measured development baseline but has
 not met its target. Genuine mixed-language development results are also below
 usable quality on several groups. The RC meeting acceptance above was executed
-and failed; completing a run does not close the commercial accuracy gates. These are
+and its results are reported above. The numerical targets remain optimization goals. These are
 developer evaluations; users provide only audio and an optional `-p` prompt,
 not a configuration file, scoring options, or a speaker count.

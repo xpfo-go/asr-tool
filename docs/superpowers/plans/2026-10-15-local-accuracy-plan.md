@@ -45,6 +45,10 @@ Approved design: `../specs/2026-10-15-local-accuracy-design.md`.
 
 ## Progress
 
+The user clarified that commercial-grade accuracy is a long-term goal, not a
+v2.0.0-rc release requirement. Numerical targets remain optimization criteria;
+published results and specific limitations are retained.
+
 2026-10-16 release decision: the user selected **v2.0.0-rc** after public-source
 and product-value review. Stop expanding model experiments. Ship the local
 workflow/usability improvements as a prerelease with explicit accuracy failures;
@@ -57,7 +61,7 @@ replays. Meeting/mixed accuracy gates remain failed. One mixed run was stopped
 by host memory pressure; completed cases were retained and remaining cases
 completed unchanged after pressure normalized. Native/Python/installation checks
 pass. Remote CI, publication, and installed-Skill updates still require successful
-GitHub access. Execution completion is not a passed accuracy gate.
+GitHub access. Execution completion does not establish the numerical targets.
 
 - [x] Written design reviewed and approved by the user.
 - [x] Public annotation and full Whisper download sources verified.

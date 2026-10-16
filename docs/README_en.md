@@ -2,8 +2,7 @@
 
 [简体中文](../README.md) | English
 
-**v2.0.0-rc** is a prerelease. Public evaluation has not met the commercial
-accuracy targets; meeting text and speaker attribution still require review.
+**v2.0.0-rc** is a prerelease with local meeting transcription and live audio review.
 
 Local speech-to-text for meetings recorded on one device, with mixed-language transcription, speaker labels, and conservative correction. Audio, transcripts, and voice embeddings stay on your machine.
 
@@ -145,7 +144,7 @@ Speaker labels are assigned across the entire recording in first-occurrence orde
 
 VAD skips silence and prefers pauses as window boundaries. Windows do not overlap; a small amount of accepted text carries context forward. Automatic language selection uses continuity only when current audio weakly favors a switch and still supports the previous language. Clear switches retain the original language. Low-confidence or repetitive windows are decoded again locally. Candidates that change numbers or negations, substantially rewrite the text, or increase repetition are rejected. JSON includes `corrections` with the original and accepted replacement text; `confidence` is a token score, not an accuracy estimate.
 
-Local ERes2Net is the default speaker model. Existing WeSpeaker installations continue to work offline; `asr-tool --prepare-models` updates the cache. No speaker count, threshold, or configuration file is required. Acoustic alignment places text on the speaker timeline. When alignment fails, the complete utterance is kept together and receives a speaker only if the evidence is consistent throughout; otherwise its speaker is unknown. `--no-speakers` skips diarization and the additional alignment. JSON adds `speaker_model`, the independent `speaker_turns` timeline, and per-segment `review_reasons`. Public meeting evaluation and limitations are documented in [EVALUATION.md](EVALUATION.md); commercial accuracy has not been established.
+Local ERes2Net is the default speaker model. Existing WeSpeaker installations continue to work offline; `asr-tool --prepare-models` updates the cache. No speaker count, threshold, or configuration file is required. Acoustic alignment places text on the speaker timeline. When alignment fails, the complete utterance is kept together and receives a speaker only if the evidence is consistent throughout; otherwise its speaker is unknown. `--no-speakers` skips diarization and the additional alignment. JSON adds `speaker_model`, the independent `speaker_turns` timeline, and per-segment `review_reasons`. Public meeting evaluation and limitations are documented in [EVALUATION.md](EVALUATION.md).
 
 Overlapping speech has `overlap: true`; uncertain text has `needs_review: true`. Uncertain speakers are `null`. Brief interjections, distant microphones, and simultaneous speech still need review; the tool does not separate voices. Use `--no-speakers` to skip diarization. Missing speaker models produce a warning and text-only output; missing ASR/VAD models produce an error.
 

@@ -96,6 +96,11 @@ claim real-time correction from first-pass throughput alone.
 
 ## Acceptance Gates
 
+Release clarification (2026-10-16): the user confirmed that commercial-grade
+accuracy is a long-term optimization goal, not a requirement for v2.0.0-rc.
+The targets below remain useful for evaluating future changes; the RC publishes
+its measured results and known limitations.
+
 These are initial engineering targets, not achieved results or industry-wide
 definitions of commercial accuracy:
 

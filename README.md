@@ -2,8 +2,8 @@
 
 简体中文 | [English](docs/README_en.md)
 
-当前开发版本为 **v2.0.0-rc**，属于预发布版。公开评测尚未达到商业准确率目标，
-会议文字和说话人归属仍需核对；[方向审查](docs/PRODUCT_DIRECTIONS.md)说明本轮取舍。
+当前开发版本为 **v2.0.0-rc**，属于预发布版，提供本地会议转写和实时复核。
+[方向审查](docs/PRODUCT_DIRECTIONS.md)说明本轮取舍。
 
 本地语音转文字工具，支持单设备录制的多人会议、中英文混合转写、说话人区分和保守纠错。录音、转写和声纹只在本机处理。
 
@@ -127,8 +127,8 @@ asr-tool --live -p "项目名、型号、专业术语" -o meeting-live.jsonl
 
 实时链路先用轻量本地模型出 provisional 文本，再用本地 Turbo 模型复核并输出
 revision/final 事件。没有云端服务；实时模型和复核模型都必须提前通过
-`asr-tool --prepare-models` 准备。当前实时链路优先验证延迟和资源边界，公开混合语音
-评测的文字准确率仍未达到商业验收目标。
+`asr-tool --prepare-models` 准备。公开混合语音评测的文字错误率、延迟和资源占用
+见 [EVALUATION.md](docs/EVALUATION.md)。
 
 默认结果保存在输入文件旁，扩展名为 `.txt`。会议文本带时间位置、说话人及
 `[需复核]` 标记。使用 `-o meeting.json`、`-o meeting.srt` 或 `-o meeting.vtt`
@@ -147,7 +147,7 @@ asr-tool meeting.mp4 -p "MAP、rolling hours、cycle、graph" -o meeting.json
 - 会议声纹默认使用本地 ERes2Net；已安装的旧 WeSpeaker 缓存仍可离线使用，运行 `asr-tool --prepare-models` 可更新。用户无需填写人数或聚类阈值。
 - 默认按声学时间对齐文字与说话人；对齐失效时整句保留，只有全句证据一致时才标注说话人，换人或证据不足则留空。`--no-speakers` 跳过说话人分析及额外对齐。
 - 检测到的重叠发言标为 `overlap`；`review_reasons` 区分文字低分、重复、纠错被拒、时间近似和说话人不确定。JSON 的 `speaker_turns` 保留独立声音时间轴，`speaker_model` 记录实际模型。
-- 证据不足的说话人为 `null`；短促插话、远场噪声和同声发言仍需人工复核，不做声源分离。公开会议评测与复现命令见 [EVALUATION.md](docs/EVALUATION.md)，尚不宣称商业级准确度。
+- 证据不足的说话人为 `null`；短促插话、远场噪声和同声发言仍需人工复核，不做声源分离。公开会议评测与复现命令见 [EVALUATION.md](docs/EVALUATION.md)。
 - 默认分析说话人。只需普通转写时用 `--no-speakers`；说话人模型缺失会告警并继续输出文本，VAD/ASR 模型缺失则报错。
 
 全录音 PCM 用于全局说话人聚类，内存和临时 WAV 各约每小时 220MiB，另外需要模型及推理内存；长会议建议 8GB 以上内存。
