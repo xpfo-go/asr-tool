@@ -41,7 +41,10 @@ try {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 cmake -B $BuildDir -DCMAKE_BUILD_TYPE=Release $CUDA_FLAG
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 cmake --build $BuildDir --config Release -j (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 cmake --install $BuildDir --config Release --prefix $InstallDir
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 info "构建完成: $InstallDir\bin\asr-tool.exe"

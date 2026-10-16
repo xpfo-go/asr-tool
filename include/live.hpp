@@ -48,6 +48,8 @@ struct LiveReviewResult {
 
 // Endpoint audio is owned by this bounded queue. The reviewer runs on its own
 // thread; accepted audio includes the in-flight job in the 20-second budget.
+// The owner must stop submitters before calling finish(), and serialize finish()
+// calls. Reviewer/sink callbacks must not call submit() or finish() on this queue.
 class LiveReviewQueue {
 public:
     using Reviewer = std::function<LiveReviewResult(const std::vector<float>&)>;

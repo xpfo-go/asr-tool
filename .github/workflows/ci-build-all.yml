@@ -39,6 +39,7 @@ permissions:
 jobs:
   evaluation-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,6 +64,11 @@ jobs:
               printf '\n### %s\n\n```text\n' "$(basename "$log")" >> "$GITHUB_STEP_SUMMARY"
               tail -n 160 "$log" >> "$GITHUB_STEP_SUMMARY"
               printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+              message="$(tail -n 80 "$log")"
+              message="${message//'%'/'%25'}"
+              message="${message//$'\r'/'%0D'}"
+              message="${message//$'\n'/'%0A'}"
+              printf '::error title=%s::%s\n' "$(basename "$log")" "$message"
             fi
           done
 
@@ -116,6 +122,9 @@ jobs:
             Add-Content $env:GITHUB_STEP_SUMMARY '```text'
             Get-Content $log -Tail 160 | Add-Content $env:GITHUB_STEP_SUMMARY
             Add-Content $env:GITHUB_STEP_SUMMARY '```'
+            $message = (Get-Content $log -Tail 80) -join "`n"
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows CMake configuration::$message"
           }
 
       - name: Build (Linux)

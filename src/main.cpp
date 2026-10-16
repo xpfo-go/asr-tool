@@ -7,7 +7,6 @@
 #include "transcriber.hpp"
 #include "types.hpp"
 
-#include <ggml-backend.h>
 #include <whisper.h>
 
 #include <cstdio>
@@ -82,15 +81,6 @@ bool parse_format(const std::string& s, OutputFormat* out) {
     return false;
 }
 
-void load_runtime_backends() {
-#if defined(__linux__) || defined(_WIN32)
-    const size_t before = ggml_backend_dev_count();
-    ggml_backend_load_all();
-    const size_t after = ggml_backend_dev_count();
-    (void)fprintf(stderr, "[INFO] 后端加载: %zu -> %zu 个设备\n", before, after);
-#endif
-}
-
 int run_live(const std::string& output_path, const std::string& language,
              const std::string& prompt, const std::string& model_dir,
              bool verbose) {
@@ -105,7 +95,6 @@ int run_live(const std::string& output_path, const std::string& language,
 #else
     try {
     if (verbose) (void)fprintf(stderr, "[INFO] verbose 日志已启用\n");
-    load_runtime_backends();
     const Backend backend = detect_backend();
     const std::filesystem::path model_path =
         model_dir.empty() ? get_default_model_path() :
@@ -195,9 +184,14 @@ int run_live(const std::string& output_path, const std::string& language,
     }
     try {
         streaming.finish();
-        review_queue.finish();
     } catch (const std::exception& error) {
         (void)fprintf(stderr, "[ERROR] 实时转写失败: %s\n", error.what());
+        failed = true;
+    }
+    try {
+        review_queue.finish();
+    } catch (const std::exception& error) {
+        (void)fprintf(stderr, "[ERROR] 实时复核失败: %s\n", error.what());
         failed = true;
     }
     {
@@ -353,7 +347,11 @@ int main(int argc, char* argv[]) {
         (void)fprintf(stderr, "[ERROR] 输出不能覆盖原始录音: %s\n", output_path.c_str());
         return 1;
     }
-    const auto output_parent = std::filesystem::absolute(output_path).parent_path();
+    const auto output_parent = std::filesystem::absolute(output_path, path_error).parent_path();
+    if (path_error) {
+        (void)fprintf(stderr, "[ERROR] 无法解析输出路径: %s\n", path_error.message().c_str());
+        return 4;
+    }
     if (!std::filesystem::is_directory(output_parent, path_error) ||
         std::filesystem::is_directory(output_path, path_error)) {
         (void)fprintf(stderr, "[ERROR] 输出目录不存在或输出路径是目录: %s\n", output_path.c_str());
@@ -379,7 +377,6 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    load_runtime_backends();
     Backend backend = detect_backend();
 
     std::filesystem::path model_path;

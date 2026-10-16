@@ -269,7 +269,57 @@ void test_output(const std::filesystem::path& directory) {
         }
     }
     check(!write_output(result, OutputFormat::Text, directory / "absent" / "file"), "write failure must propagate");
+    const auto original = directory / "recording.wav";
+    { std::ofstream audio(original); audio << "original audio"; }
+    const auto linked = directory / "linked.txt";
+    std::filesystem::create_hard_link(original, linked);
+    check(write_output(result, OutputFormat::Text, linked), "replace existing hard link");
+#ifndef _WIN32
+    std::filesystem::remove(linked);
+    std::filesystem::create_symlink(std::filesystem::absolute(original), linked);
+    check(write_output(result, OutputFormat::Text, linked), "replace symlink without following it");
+    check(!std::filesystem::is_symlink(linked), "output must replace the symlink entry");
+#endif
+    std::ifstream audio(original);
+    check(std::string(std::istreambuf_iterator<char>(audio), {}) == "original audio",
+          "output must never truncate a linked original recording");
     check(!ensure_main_model(directory / "missing.bin"), "offline inference cannot download missing model");
+}
+
+void test_output_edge_cases(const std::filesystem::path& directory) {
+    const auto output = directory / "edge.out";
+    TranscriptionResult result;
+    result.speaker_turns = {{123450, 123460, 0, .7}};
+    result.duration_seconds = 124;
+    check(write_output(result, OutputFormat::Json, output), "speaker-only JSON must write");
+    {
+        std::ifstream file(output);
+        const std::string json(std::istreambuf_iterator<char>(file), {});
+        check(json.find("\"start\": 123.450, \"end\": 123.460") != std::string::npos,
+              "speaker-only timing must preserve milliseconds");
+    }
+    result.segments = {{"<test> &amp;\n\nnext", 0, 1000, -1, false, false, .8, {}}};
+    check(write_output(result, OutputFormat::Vtt, output), "VTT must write");
+    {
+        std::ifstream file(output);
+        const std::string vtt(std::istreambuf_iterator<char>(file), {});
+        check(vtt.find("&lt;test&gt; &amp;amp;  next") != std::string::npos,
+              "VTT must retain literal markup and prevent blank cue separators");
+    }
+    const auto before = std::filesystem::file_size(output);
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+        result.segments[0].confidence = invalid;
+        check(!write_output(result, OutputFormat::Json, output), "non-finite JSON must fail");
+        check(std::filesystem::file_size(output) == before, "invalid output must retain previous file");
+    }
+    result.segments[0].confidence = .8;
+    for (double invalid : {-1., std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(), 1e30}) {
+        result.segments[0].start_ms = invalid;
+        check(!write_output(result, OutputFormat::Srt, output), "invalid subtitle time must fail");
+    }
 }
 
 }  // namespace
@@ -287,6 +337,7 @@ int main(int argc, char** argv) {
         test_acoustic_timing();
         test_approximate_speakers();
         test_output(directory);
+        test_output_edge_cases(directory);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

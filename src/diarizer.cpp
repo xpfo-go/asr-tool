@@ -26,6 +26,8 @@ int32_t report_progress(int32_t done, int32_t total, void* data) {
 std::vector<SpeakerTurn> diarize(const std::vector<float>& samples,
                                 const std::filesystem::path& model_dir,
                                 std::string& error, std::string& model_name) try {
+    error.clear();
+    model_name.clear();
     const std::string segmentation = (model_dir / "segmentation.onnx").string();
     if (samples.empty() || samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
         error = "音频为空或超过说话人分析长度限制";

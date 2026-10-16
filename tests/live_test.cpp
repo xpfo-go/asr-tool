@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <future>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -118,6 +119,16 @@ void validate_audio_ownership_and_json() {
           json.find("\"type\":\"final\"") != std::string::npos &&
           json.find("\"reviewed\":false") != std::string::npos && json.back() == '\n',
           "JSONL must escape content and expose final review state");
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+        event.emitted_seconds = invalid;
+        std::ostringstream invalid_output;
+        rejected = false;
+        try { write_live_event(invalid_output, event); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected && invalid_output.str().empty(), "invalid JSONL must fail before emitting a partial line");
+    }
 }
 
 }  // namespace

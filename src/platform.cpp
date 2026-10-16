@@ -3,8 +3,17 @@
 #include <ggml-backend.h>
 
 #include <cstdio>
+#include <mutex>
 
 Backend detect_backend() {
+#if defined(__linux__) || defined(_WIN32)
+    static std::once_flag initialized;
+    std::call_once(initialized, [] {
+        const size_t before = ggml_backend_dev_count();
+        ggml_backend_load_all();
+        (void)fprintf(stderr, "[INFO] 后端加载: %zu -> %zu 个设备\n", before, ggml_backend_dev_count());
+    });
+#endif
 #if defined(__APPLE__)
     // macOS: 始终启用 GPU 路径，实际是否启用 CoreML 由 whisper.cpp 运行时决定。
     // 当缺少 .mlmodelc 时，whisper.cpp 会回退到非 CoreML 路径。

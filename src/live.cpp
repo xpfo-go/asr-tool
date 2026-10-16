@@ -43,15 +43,18 @@ bool LiveReviewQueue::submit(LiveReviewTask task) {
         if (task.utterance_id <= last_id_ || task.start_sample < last_end_) {
             throw std::invalid_argument("Live utterances must have increasing IDs and non-overlapping audio");
         }
-        last_id_ = task.utterance_id;
-        last_end_ = task.end_sample;
         if (task.audio.size() <= LIVE_REVIEW_SAMPLE_LIMIT - pending_samples_) {
-            pending_samples_ += task.audio.size();
-            peak_pending_samples_ = std::max(peak_pending_samples_, pending_samples_);
             pending_.push_back(std::move(task));
+            const auto& queued = pending_.back();
+            last_id_ = queued.utterance_id;
+            last_end_ = queued.end_sample;
+            pending_samples_ += queued.audio.size();
+            peak_pending_samples_ = std::max(peak_pending_samples_, pending_samples_);
             changed_.notify_one();
             return true;
         }
+        last_id_ = task.utterance_id;
+        last_end_ = task.end_sample;
     }
     emit(final_event(task, "review_queue_full"));
     return false;

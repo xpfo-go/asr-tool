@@ -109,7 +109,16 @@ binary_release_marker() {
 }
 
 model_cache_dir() {
-  printf '%s\n' "$HOME/.cache/whisper"
+  local cache_root
+  cache_root="${XDG_CACHE_HOME:-}"
+  if [[ -z "$cache_root" ]]; then
+    if is_windows && [[ -n "${USERPROFILE:-}" ]]; then
+      cache_root="$USERPROFILE/.cache"
+    else
+      cache_root="$HOME/.cache"
+    fi
+  fi
+  printf '%s\n' "${cache_root%/}/whisper"
 }
 
 choose_shell_rc_file() {
@@ -263,9 +272,9 @@ toggle_all_selection_indexes() {
 }
 
 prompt_for_targets() {
-  local -a detected
+  local -a detected=()
   local selection prompt_in prompt_out current_index key key_2 key_3
-  local selected_indexes status_message menu_lines
+  local selected_indexes status_message='' menu_lines
   local label root_dir marker cursor_prefix
   local index prompt_tty_state
 
@@ -568,7 +577,7 @@ SHIM
   chmod +x "$shim_path"
 }
 
-install_or_update_binary() {
+install_or_update_binary() (
   local os_name arch_name asset_name binary_name install_dir marker_path marker_tag
   local temp_dir archive_path extract_dir download_url
 
@@ -580,7 +589,7 @@ install_or_update_binary() {
   marker_tag="$(cat "$marker_path" 2>/dev/null || true)"
 
   if [[ "$marker_tag" == "$1" && -f "$install_dir/$binary_name" &&
-        -f "$install_dir/THIRD_PARTY_NOTICES.txt" ]]; then
+        -s "$install_dir/THIRD_PARTY_NOTICES.txt" ]]; then
     if [[ "$os_name" == 'Windows' ]]; then
       write_windows_shim "$install_dir"
     fi
@@ -589,40 +598,40 @@ install_or_update_binary() {
   fi
 
   temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/asr-tool-installer.XXXXXX")"
-  trap 'rm -rf "$temp_dir"' RETURN
+  trap 'rm -rf "$temp_dir"' EXIT
   download_url="$(release_download_url "$1" "$asset_name")"
   mkdir -p "$install_dir"
-  remove_old_binary_payload "$install_dir"
+  extract_dir="$temp_dir/extracted"
+  mkdir -p "$extract_dir"
 
   if [[ "$asset_name" == *.zip ]]; then
     archive_path="$temp_dir/$asset_name"
-    extract_dir="$temp_dir/extracted"
     log "Downloading ${asset_name}"
-    download_file "$download_url" "$archive_path"
-    extract_zip_archive "$archive_path" "$extract_dir"
-    cp -fR "$extract_dir"/. "$install_dir"/
-    if [[ "$os_name" == 'Windows' ]]; then
-      write_windows_shim "$install_dir"
-    else
-      chmod +x "$install_dir/asr-tool"
-    fi
+    download_file "$download_url" "$archive_path" || return 1
+    extract_zip_archive "$archive_path" "$extract_dir" || return 1
   else
     log "Downloading ${asset_name}"
-    download_file "$download_url" "$install_dir/asr-tool"
-    chmod +x "$install_dir/asr-tool"
+    download_file "$download_url" "$extract_dir/asr-tool" || return 1
     download_file "$(release_download_url "$1" 'THIRD_PARTY_NOTICES.txt')" \
-      "$install_dir/THIRD_PARTY_NOTICES.txt"
+      "$extract_dir/THIRD_PARTY_NOTICES.txt" || return 1
   fi
 
+  [[ -s "$extract_dir/$binary_name" && -s "$extract_dir/THIRD_PARTY_NOTICES.txt" ]] ||
+    die 'Release payload is missing its binary or third-party notices'
+  if [[ "$os_name" == 'Windows' ]]; then
+    write_windows_shim "$extract_dir"
+  else
+    chmod +x "$extract_dir/asr-tool"
+  fi
+  remove_old_binary_payload "$install_dir"
+  cp -fR "$extract_dir"/. "$install_dir"/ || return 1
   printf '%s\n' "$1" > "$marker_path"
-  trap - RETURN
-  rm -rf "$temp_dir"
   log "Installed shared binary into $install_dir"
-}
+)
 
 ensure_model() {
   log 'Preparing local ASR, VAD, speaker, and live models'
-  "$(binary_install_dir)/asr-tool" --prepare-models -m "$(model_cache_dir)"
+  "$(binary_install_dir)/asr-tool" --prepare-models
 }
 
 run_with_privilege() {
@@ -754,7 +763,7 @@ ensure_path_configuration() {
 
 main() {
   local latest_tag prompt_output target_entry label root_dir
-  local -a targets
+  local -a targets=()
 
   command_exists git || die 'git is required to install or update Skill directories'
   command_exists curl || die 'curl is required to download release assets'

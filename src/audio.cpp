@@ -1,5 +1,8 @@
 #include "audio.hpp"
+#include "temporary_directory.hpp"
 
+#include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -12,9 +15,12 @@
 #include <limits>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
-#include <process.h>
 #else
+#include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -30,69 +36,44 @@ constexpr double CHUNK_SECONDS = 30.0;
 constexpr size_t CHUNK_SAMPLES =
     static_cast<size_t>(SAMPLE_RATE * CHUNK_SECONDS);  // 480000
 
-int current_pid() {
 #ifdef _WIN32
-    return _getpid();
-#else
-    return getpid();
+std::wstring quote_windows_argument(const std::wstring& argument) {
+    std::wstring quoted = L"\"";
+    size_t backslashes = 0;
+    for (wchar_t character : argument) {
+        if (character == L'\\') { ++backslashes; continue; }
+        quoted.append(backslashes * (character == L'"' ? 2 : 1), L'\\');
+        if (character == L'"') quoted += L'\\';
+        quoted += character;
+        backslashes = 0;
+    }
+    quoted.append(backslashes * 2, L'\\');
+    return quoted + L'"';
+}
 #endif
-}
-
-// 获取临时目录文件路径
-std::filesystem::path make_temp_wav_path() {
-    auto temp_dir = std::filesystem::temp_directory_path();
-    std::ostringstream oss;
-    oss << "asr_tool_" << current_pid() << "_" << rand() << ".wav";
-    return temp_dir / oss.str();
-}
 
 // 执行子进程 (无 shell，防止命令注入)
 // 所有平台均使用 argv 数组，不经过 shell
-int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
+int run_ffmpeg(const std::filesystem::path& input_path, const std::filesystem::path& output_path) {
 #ifdef _WIN32
-    // Windows: 使用 CreateProcessA 传递 argv，不经过 shell
-    // 预构建 argv 数组，保持生命周期
-    std::string arg_ar = std::to_string(SAMPLE_RATE);
-    std::string arg_ac = std::to_string(CHANNELS);
-    const char* ffmpeg_argv[] = {
-        "ffmpeg",
-        "-y",
-        "-nostdin",
-        "-protocol_whitelist",
-        "file,pipe",
-        "-i",
-        input_path.c_str(),
-        "-ar",
-        arg_ar.c_str(),
-        "-ac",
-        arg_ac.c_str(),
+    const std::vector<std::wstring> arguments = {
+        L"ffmpeg", L"-y", L"-nostdin", L"-protocol_whitelist", L"file,pipe",
+        L"-i", input_path.native(), L"-ar", std::to_wstring(SAMPLE_RATE),
+        L"-ac", std::to_wstring(CHANNELS),
 #ifdef ASR_EXPERIMENT_AUDIO_FILTER
-        "-af",
-        ASR_EXPERIMENT_AUDIO_FILTER,
+        L"-af", std::filesystem::u8path(ASR_EXPERIMENT_AUDIO_FILTER).native(),
 #endif
-        "-f",
-        "wav",
-        "-acodec",
-        "pcm_f32le",
-        output_path.c_str(),
-        nullptr,
+        L"-f", L"wav", L"-acodec", L"pcm_f32le", output_path.native(),
     };
-
-    std::string cmd_line;
-    for (int i = 0; ffmpeg_argv[i] != nullptr; ++i) {
-        if (i > 0) cmd_line += ' ';
-        if (strchr(ffmpeg_argv[i], ' ') != nullptr) {
-            cmd_line += '"';
-            cmd_line += ffmpeg_argv[i];
-            cmd_line += '"';
-        } else {
-            cmd_line += ffmpeg_argv[i];
-        }
+    std::wstring cmd_line;
+    for (const auto& argument : arguments) {
+        if (!cmd_line.empty()) cmd_line += L' ';
+        cmd_line += quote_windows_argument(argument);
     }
 
-    STARTUPINFOA si = {sizeof(si)};
+    STARTUPINFOW si = {sizeof(si)};
     PROCESS_INFORMATION pi = {};
-    BOOL ok = CreateProcessA(
+    BOOL ok = CreateProcessW(
         nullptr,
         cmd_line.data(),
         nullptr,
@@ -147,7 +128,13 @@ int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
     if (status != 0) {
         return -1;
     }
-    if (waitpid(pid, &status, 0) == -1) {
+    pid_t waited;
+    do { waited = waitpid(pid, &status, 0); } while (waited == -1 && errno == EINTR);
+    if (waited == -1) {
+        if (errno != ECHILD) {
+            kill(pid, SIGKILL);
+            while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
+        }
         return -1;
     }
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -159,21 +146,16 @@ int run_ffmpeg(const std::string& input_path, const std::string& output_path) {
 // --- AudioReader::Impl (PIMPL) ---
 
 struct AudioReader::Impl {
+    TemporaryDirectory temp_directory{std::filesystem::temp_directory_path()};
     std::FILE* file = nullptr;
-    std::filesystem::path temp_wav_path;
     size_t total_samples_read = 0;
     size_t data_size = 0;
-    size_t data_offset = 0;
     bool eof = false;
 
     ~Impl() {
         if (file) {
             std::fclose(file);
             file = nullptr;
-        }
-        if (!temp_wav_path.empty()) {
-            std::error_code ec;
-            std::filesystem::remove(temp_wav_path, ec);
         }
     }
 };
@@ -185,17 +167,20 @@ AudioReader::AudioReader(const std::filesystem::path& path)
     processed_seconds_ = 0.0;
 
     // 用 FFmpeg 转换为临时 WAV 文件
-    auto temp_path = make_temp_wav_path();
-    impl_->temp_wav_path = temp_path;
+    auto temp_path = impl_->temp_directory.path() / "audio.wav";
 
-    (void)printf("[INFO] 转换音频格式: %s\n", path.filename().string().c_str());
-    int ret = run_ffmpeg(path.string(), temp_path.string());
+    (void)printf("[INFO] 转换音频格式: %s\n", path.filename().u8string().c_str());
+    int ret = run_ffmpeg(path, temp_path);
     if (ret != 0) {
         throw std::runtime_error("FFmpeg 转换失败 (退出码: " +
                                  std::to_string(ret) + ")");
     }
 
-    impl_->file = std::fopen(temp_path.string().c_str(), "rb");
+#ifdef _WIN32
+    impl_->file = _wfopen(temp_path.c_str(), L"rb");
+#else
+    impl_->file = std::fopen(temp_path.c_str(), "rb");
+#endif
     if (!impl_->file) {
         throw std::runtime_error("无法打开临时音频文件");
     }
@@ -221,17 +206,19 @@ AudioReader::AudioReader(const std::filesystem::path& path)
             if (chunk_size < 16) {
                 throw std::runtime_error("无效的 fmt chunk");
             }
-            std::fseek(impl_->file, chunk_size, SEEK_CUR);
         } else if (std::strncmp(chunk, "data", 4) == 0) {
             if (!found_fmt) {
                 throw std::runtime_error("WAV 文件缺少 fmt chunk");
             }
             impl_->data_size = chunk_size;
-            impl_->data_offset = static_cast<size_t>(std::ftell(impl_->file));
+            if (chunk_size % sizeof(float) != 0)
+                throw std::runtime_error("WAV data chunk is not aligned to float samples");
             break;
-        } else {
-            std::fseek(impl_->file, chunk_size, SEEK_CUR);
         }
+        const uint64_t skip = uint64_t(chunk_size) + (chunk_size & 1);
+        if (skip > static_cast<uint64_t>((std::numeric_limits<long>::max)()) ||
+            std::fseek(impl_->file, static_cast<long>(skip), SEEK_CUR) != 0)
+            throw std::runtime_error("Could not skip WAV chunk");
     }
 
     if (impl_->data_size == 0) {
@@ -254,26 +241,26 @@ AudioReader::AudioReader(AudioReader&& other) noexcept = default;
 AudioReader& AudioReader::operator=(AudioReader&& other) noexcept = default;
 
 AudioChunk AudioReader::read_chunk() {
-    AudioChunk chunk;
+    AudioChunk chunk{};
     if (impl_->eof) {
         eof_ = true;
         return chunk;
     }
 
-    chunk.samples.resize(CHUNK_SAMPLES);
+    const size_t remaining = impl_->data_size / sizeof(float) - impl_->total_samples_read;
+    const size_t requested = std::min(CHUNK_SAMPLES, remaining);
+    chunk.samples.resize(requested);
     size_t total_read = 0;
 
-    while (total_read < CHUNK_SAMPLES) {
-        size_t to_read = CHUNK_SAMPLES - total_read;
+    while (total_read < requested) {
+        size_t to_read = requested - total_read;
         size_t frames_read =
             std::fread(chunk.samples.data() + total_read, sizeof(float),
                        to_read, impl_->file);
         total_read += frames_read;
 
-        if (frames_read == 0) {
-            impl_->eof = true;
-            break;
-        }
+        if (std::ferror(impl_->file) || frames_read == 0)
+            throw std::runtime_error("读取音频失败或 WAV 数据被截断");
     }
 
     // 调整到实际读取的大小
@@ -281,6 +268,7 @@ AudioChunk AudioReader::read_chunk() {
     chunk.offset_ms =
         static_cast<double>(impl_->total_samples_read) / SAMPLE_RATE * 1000.0;
     impl_->total_samples_read += total_read;
+    impl_->eof = impl_->total_samples_read == impl_->data_size / sizeof(float);
 
     // 更新已处理时长
     processed_seconds_ =

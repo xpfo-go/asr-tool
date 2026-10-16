@@ -164,6 +164,17 @@ if(ASR_SHERPA_RUNTIME)
         COMMAND_EXPAND_LISTS VERBATIM)
     install(FILES ${ASR_SHERPA_RUNTIME} DESTINATION bin)
 endif()
+if(WIN32)
+    foreach(runtime IN ITEMS whisper ggml ggml-base ggml-cpu ggml-cuda)
+        if(TARGET ${runtime})
+            add_custom_command(TARGET ${ASR_TARGET_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${runtime}>"
+                        "$<TARGET_FILE_DIR:${ASR_TARGET_NAME}>"
+                VERBATIM)
+            install(FILES "$<TARGET_FILE:${runtime}>" DESTINATION bin)
+        endif()
+    endforeach()
+endif()
 
 # Keep runtime search path local on Linux so bundled .so files are discovered.
 if(UNIX AND NOT APPLE)
@@ -199,6 +210,18 @@ install(FILES docs/THIRD_PARTY_NOTICES.txt DESTINATION bin)
 include(CTest)
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
+    add_executable(fake_ffmpeg tests/fake_ffmpeg.cpp)
+    set_target_properties(fake_ffmpeg PROPERTIES OUTPUT_NAME ffmpeg
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/audio-test-tools")
+    add_executable(audio_test tests/audio_test.cpp src/audio.cpp)
+    target_include_directories(audio_test PRIVATE include)
+    foreach(target IN ITEMS fake_ffmpeg audio_test)
+        target_compile_options(${target} PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+            $<$<CXX_COMPILER_ID:MSVC>:/W4 /utf-8>)
+    endforeach()
+    add_dependencies(audio_test fake_ffmpeg)
+    add_test(NAME audio COMMAND audio_test "$<TARGET_FILE_DIR:fake_ffmpeg>")
     add_executable(live_test tests/live_test.cpp src/live.cpp src/meeting.cpp src/output.cpp)
     target_include_directories(live_test PRIVATE include)
     target_link_libraries(live_test PRIVATE Threads::Threads)

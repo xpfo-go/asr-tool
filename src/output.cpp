@@ -2,6 +2,7 @@
 
 #include "live.hpp"
 #include "types.hpp"
+#include "temporary_directory.hpp"
 
 #include <cstdio>
 #include <cmath>
@@ -10,10 +11,55 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <sstream>
 #include <string>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
+
+bool valid_time(double milliseconds) {
+    return std::isfinite(milliseconds) && milliseconds >= 0 &&
+           std::round(milliseconds) < static_cast<double>((std::numeric_limits<int64_t>::max)());
+}
+
+bool valid_numbers(const TranscriptionResult& result) {
+    if (!std::isfinite(result.duration_seconds) || result.duration_seconds < 0) return false;
+    const auto& settings = result.decoding_settings;
+    if (!std::isfinite(settings.review_threshold) || !std::isfinite(settings.correction_confidence_gain) ||
+        !std::isfinite(settings.vad_threshold)) return false;
+    for (const auto& segment : result.segments) {
+        if (!valid_time(segment.start_ms) || !valid_time(segment.end_ms) ||
+            segment.end_ms < segment.start_ms || !std::isfinite(segment.confidence)) return false;
+    }
+    for (const auto& turn : result.speaker_turns) {
+        if (!valid_time(turn.start_ms) || !valid_time(turn.end_ms) ||
+            turn.end_ms < turn.start_ms || !std::isfinite(turn.confidence)) return false;
+    }
+    for (const auto& correction : result.corrections) {
+        if (!valid_time(correction.start_ms) || !valid_time(correction.end_ms) ||
+            correction.end_ms < correction.start_ms) return false;
+    }
+    return true;
+}
+
+void write_vtt_text(std::ostream& output, const std::string& text) {
+    for (char character : text) {
+        switch (character) {
+            case '&': output << "&amp;"; break;
+            case '<': output << "&lt;"; break;
+            case '>': output << "&gt;"; break;
+            case '\r': case '\n': output << ' '; break;
+            default: output << character; break;
+        }
+    }
+}
 
 std::string ms_to_srt_time(double ms) {
     int64_t total_ms = static_cast<int64_t>(std::round(ms));
@@ -115,6 +161,7 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
         }
 
         case OutputFormat::Json: {
+            os << std::fixed;
             os << "{\n";
             os << "  \"text\": ";
             write_json_string(os, result.full_text);
@@ -227,7 +274,8 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
                 const auto& seg = result.segments[i];
                 os << ms_to_vtt_time(seg.start_ms) << " --> "
                    << ms_to_vtt_time(seg.end_ms) << "\n";
-                os << speaker_label(seg, result.speakers_available) << seg.text << "\n\n";
+                write_vtt_text(os, speaker_label(seg, result.speakers_available) + seg.text);
+                os << "\n\n";
             }
             break;
         }
@@ -238,6 +286,10 @@ void write_to_stream(std::ostream& os, const TranscriptionResult& result,
 
 bool write_output(const TranscriptionResult& result, OutputFormat format,
                   const std::filesystem::path& output_path) {
+    if (!valid_numbers(result)) {
+        (void)fprintf(stderr, "[ERROR] 输出包含无效时间或非有限数值\n");
+        return false;
+    }
     if (output_path.empty()) {
         // 输出到 stdout
         write_to_stream(std::cout, result, format);
@@ -246,8 +298,11 @@ bool write_output(const TranscriptionResult& result, OutputFormat format,
             return false;
         }
         return true;
-    } else {
-        std::ofstream file(output_path.string());
+    } else try {
+        const auto parent = output_path.has_parent_path() ? output_path.parent_path() : std::filesystem::path(".");
+        TemporaryDirectory staging(parent);
+        const auto staged_path = staging.path() / "transcript";
+        std::ofstream file(staged_path);
         if (!file.is_open()) {
             (void)fprintf(stderr, "[ERROR] 无法写入输出文件: %s\n",
                            output_path.string().c_str());
@@ -265,12 +320,24 @@ bool write_output(const TranscriptionResult& result, OutputFormat format,
                            output_path.string().c_str());
             return false;
         }
+        // Replacing the directory entry never truncates an existing symlink target.
+#ifdef _WIN32
+        if (!MoveFileExW(staged_path.c_str(), output_path.c_str(), MOVEFILE_REPLACE_EXISTING))
+            throw std::system_error(GetLastError(), std::system_category(), "Replace output");
+#else
+        std::filesystem::rename(staged_path, output_path);
+#endif
         (void)printf("[DONE] 输出已保存: %s\n", output_path.string().c_str());
         return true;
+    } catch (const std::exception& error) {
+        (void)fprintf(stderr, "[ERROR] 无法保存输出: %s\n", error.what());
+        return false;
     }
 }
 
 void write_live_event(std::ostream& output, const LiveEvent& event) {
+    if (!std::isfinite(event.emitted_seconds))
+        throw std::invalid_argument("Non-finite live event timestamp");
     const char* kind = event.kind == LiveEventKind::Provisional ? "provisional" :
                        event.kind == LiveEventKind::Revision ? "revision" : "final";
     output << "{\"type\":\"" << kind << "\",\"utterance_id\":" << event.utterance_id

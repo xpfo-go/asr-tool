@@ -179,6 +179,49 @@ if b"^[[B" in capture:
 PY
 rm -f "$pty_capture_file"
 
+assert_eq "$temp_home/model cache/whisper" "$(XDG_CACHE_HOME="$temp_home/model cache/" model_cache_dir)"
+assert_eq "$temp_home/.cache/whisper" "$(XDG_CACHE_HOME= model_cache_dir)"
+assert_eq "$temp_home/windows user/.cache/whisper" "$(
+  is_windows() { return 0; }
+  XDG_CACHE_HOME= USERPROFILE="$temp_home/windows user" model_cache_dir
+)"
+mkdir -p "$temp_home/.local/bin"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$@" > "$ASR_TEST_MODEL_ARGUMENTS"' > "$temp_home/.local/bin/asr-tool"
+chmod +x "$temp_home/.local/bin/asr-tool"
+ASR_TEST_MODEL_ARGUMENTS="$temp_home/model-arguments" \
+  XDG_CACHE_HOME="$temp_home/model cache" ensure_model
+assert_eq '--prepare-models' "$(cat "$temp_home/model-arguments")"
+
+(
+  detect_os_arch() { printf 'macOS arm64\n'; }
+  install_dir="$(binary_install_dir)"
+  marker="$(binary_release_marker)"
+  printf 'old binary\n' > "$install_dir/asr-tool"
+  printf 'old notices\n' > "$install_dir/THIRD_PARTY_NOTICES.txt"
+  printf 'vold\n' > "$marker"
+  download_file() { return 1; }
+  if install_or_update_binary vnew; then
+    echo 'failed download unexpectedly succeeded'
+    exit 1
+  fi
+  assert_eq 'old binary' "$(cat "$install_dir/asr-tool")"
+  assert_eq 'vold' "$(cat "$marker")"
+  download_file() { printf 'new payload\n' > "$2"; }
+  install_or_update_binary vnew
+  assert_eq 'new payload' "$(cat "$install_dir/asr-tool")"
+  assert_eq 'vnew' "$(cat "$marker")"
+  : > "$install_dir/THIRD_PARTY_NOTICES.txt"
+  install_or_update_binary vnew
+  assert_eq 'new payload' "$(cat "$install_dir/THIRD_PARTY_NOTICES.txt")"
+  download_file() { : > "$2"; }
+  if install_or_update_binary vempty; then
+    echo 'empty payload unexpectedly succeeded'
+    exit 1
+  fi
+  assert_eq 'new payload' "$(cat "$install_dir/asr-tool")"
+  assert_eq 'vnew' "$(cat "$marker")"
+)
+
 assert_eq "$temp_home/.zshrc" "$(choose_shell_rc_file /bin/zsh)"
 assert_eq "$temp_home/.bashrc" "$(choose_shell_rc_file /bin/bash)"
 ensure_line_in_file "$temp_home/.zshrc" "$PATH_EXPORT_LINE"
